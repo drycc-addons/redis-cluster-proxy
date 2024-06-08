@@ -1,0 +1,18 @@
+matrix:
+  platform:
+  - linux/amd64
+  - linux/arm64
+
+labels:
+  type: exec
+  platform: ${platform}
+
+steps:
+- name: test-linux
+  image: bash
+  commands:
+  - podman run --rm -v $(pwd):/workspace -w /workspace registry.drycc.cc/drycc/go-dev make test
+  when:
+    event:
+    - push
+    - tag
