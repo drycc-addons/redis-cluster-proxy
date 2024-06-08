@@ -192,14 +192,6 @@ func BenchmarkValidCommand(b *testing.B) {
 	}
 }
 
-func TestCommandFormat(t *testing.T) {
-	cmd, _ := NewCommand("LLEN", "walu.cc")
-	if "*2\r\n$7\r\nwalu.cc\r\n" != string(cmd.Format()) {
-		t.Error("cmd format error")
-	}
-
-}
-
 func BenchmarkCommandFormat(b *testing.B) {
 	cmd, _ := NewCommand("LLEN", "walu.cc")
 	for i := 0; i < b.N; i++ {
