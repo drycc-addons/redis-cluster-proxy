@@ -83,7 +83,7 @@ func BenchmarkReadDataBytes(b *testing.B) {
 }
 func eqData(d1, d2 Data) bool {
 	eqType := d1.T == d2.T
-	eqString := 0 == bytes.Compare(d1.String, d2.String)
+	eqString := bytes.Equal(d1.String, d2.String)
 	eqInteger := d1.Integer == d2.Integer
 	eqNil := d1.IsNil == d2.IsNil
 	eqArrayLen := len(d1.Array) == len(d2.Array)

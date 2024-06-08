@@ -19,8 +19,8 @@ const (
 )
 
 var (
-	CRLF         = []byte{'\r', '\n'}
-	PROTOCOL_ERR = errors.New("Protocol error")
+	CRLF        = []byte{'\r', '\n'}
+	errProtocol = errors.New("protocol error")
 )
 
 /*
@@ -62,8 +62,7 @@ func (c Command) Integer(index int) (ret int64) {
 
 // Foramat a command into ArrayWithBulkString
 func (c Command) Format() []byte {
-	var ret *bytes.Buffer
-	ret = new(bytes.Buffer)
+	ret := new(bytes.Buffer)
 
 	ret.WriteByte(T_Array)
 	ret.WriteString(strconv.Itoa(len(c.Args)))
@@ -97,7 +96,7 @@ func ReadCommand(r *bufio.Reader) (*Command, error) {
 		return nil, err
 	}
 	if len(buf) == 0 {
-		return nil, PROTOCOL_ERR
+		return nil, errProtocol
 	}
 	if T_Array != buf[0] {
 		return NewCommand(strings.Fields(strings.TrimSpace(string(buf)))...)
@@ -115,7 +114,7 @@ func ReadCommand(r *bufio.Reader) (*Command, error) {
 	commandArgs := make([]string, len(ret.Array))
 	for index := range ret.Array {
 		if ret.Array[index].T != T_BulkString {
-			return nil, errors.New("Unexpected Command Type")
+			return nil, errors.New("unexpected Command Type")
 		}
 		commandArgs[index] = string(ret.Array[index].String)
 	}
@@ -134,8 +133,7 @@ type Data struct {
 
 // format Data into resp string
 func (d Data) Format() []byte {
-	var ret *bytes.Buffer
-	ret = new(bytes.Buffer)
+	ret := new(bytes.Buffer)
 
 	ret.WriteByte(d.T)
 	if d.IsNil {
@@ -183,9 +181,8 @@ func ReadData(r *bufio.Reader) (*Data, error) {
 func readDataForSpecType(r *bufio.Reader, line []byte) (*Data, error) {
 
 	var err error
-	var ret *Data
 
-	ret = new(Data)
+	ret := new(Data)
 	switch line[0] {
 	case T_SimpleString:
 		ret.T = T_SimpleString
@@ -204,8 +201,8 @@ func readDataForSpecType(r *bufio.Reader, line []byte) (*Data, error) {
 		lenBulkString, err = strconv.ParseInt(string(line[1:]), 10, 64)
 
 		ret.T = T_BulkString
-		if -1 != lenBulkString {
-			ret.String, err = readRespN(r, lenBulkString)
+		if lenBulkString != -1 {
+			ret.String, _ = readRespN(r, lenBulkString)
 			_, err = readRespN(r, 2)
 		} else {
 			ret.IsNil = true
@@ -218,7 +215,7 @@ func readDataForSpecType(r *bufio.Reader, line []byte) (*Data, error) {
 
 		ret.T = T_Array
 		if nil == err {
-			if -1 != lenArray {
+			if lenArray != -1 {
 				ret.Array = make([]*Data, lenArray)
 				for i = 0; i < lenArray && nil == err; i++ {
 					ret.Array[i], err = ReadData(r)
@@ -229,7 +226,7 @@ func readDataForSpecType(r *bufio.Reader, line []byte) (*Data, error) {
 		}
 
 	default: //Maybe you are Inline Command
-		err = errors.New("Unexpected type ")
+		err = errors.New("unexpected type ")
 
 	}
 	return ret, err
@@ -270,8 +267,7 @@ func readDataBytesForSpecType(r *bufio.Reader, line []byte, obj *Object) error {
 		// else is nil
 
 	default:
-		return errors.New("Unexpected type ")
-
+		return errors.New("unexpected type ")
 	}
 	return nil
 }
@@ -283,7 +279,7 @@ func readRespLine(r *bufio.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if n := len(line); n < 2 {
-		return nil, PROTOCOL_ERR
+		return nil, errProtocol
 	} else {
 		return line[:n-2], nil
 	}
@@ -295,7 +291,7 @@ func readRespLineBytes(r *bufio.Reader, obj *Object) ([]byte, error) {
 		return nil, err
 	}
 	if n := len(line); n < 2 {
-		return nil, PROTOCOL_ERR
+		return nil, errProtocol
 	} else {
 		obj.Append(line)
 		return line[:n-2], nil
@@ -309,7 +305,7 @@ func readRespCommandLine(r *bufio.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if n := len(line); n < 2 {
-		return nil, PROTOCOL_ERR
+		return nil, errProtocol
 	} else {
 		return line[:n-2], nil
 	}
