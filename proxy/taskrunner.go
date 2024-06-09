@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"container/list"
 	"errors"
+	"io"
 	"net"
 	"time"
 
@@ -87,7 +88,9 @@ func NewTaskRunner(server string, redisProxy *RedisProxy) *TaskRunner {
 func (tr *TaskRunner) readingLoop(out chan interface{}) {
 	var err error
 	defer func() {
-		glog.Error("exit reading loop", tr.server, err)
+		if err != io.EOF {
+			glog.Error("exit reading loop", tr.server, err)
+		}
 		close(out)
 	}()
 
@@ -203,7 +206,9 @@ func (tr *TaskRunner) tryRecover(err error) error {
 func (tr *TaskRunner) cleanupInflight(err error) {
 	for e := tr.inflight.Front(); e != nil; {
 		plReq := e.Value.(*PipelineRequest)
-		glog.Error("clean up", plReq)
+		if err != io.EOF {
+			glog.Error("clean up", plReq)
+		}
 		plRsp := &PipelineResponse{
 			ctx: plReq,
 			err: err,

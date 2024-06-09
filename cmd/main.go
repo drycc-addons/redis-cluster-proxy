@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/drycc-addons/redis-cluster-proxy/proxy"
@@ -13,21 +14,18 @@ import (
 )
 
 var config = struct {
-	//flag:"flagName,usage string"
-	Addr                   string        `flag:"addr, proxy serving addr"`
-	Password               string        `flag:"password, password for backend server, it will send this password to backend server"`
-	DebugAddr              string        `flag:"debug-addr, proxy debug listen address for pprof and set log level, default not enabled"`
-	StartupNodes           string        `flag:"startup-nodes, startup nodes used to query cluster topology"`
-	ConnectTimeout         time.Duration `flag:"connect-timeout, connect to backend timeout"`
-	SlotsReloadInterval    time.Duration `flag:"slots-reload-interval, slots reload interval"`
-	BackendIdleConnections int           `flag:"backend-idle-connections, max number of idle connections for each backend server"`
-	ReadPrefer             int           `flag:"read-prefer, where read command to send to, eg. READ_PREFER_MASTER, READ_PREFER_SLAVE, READ_PREFER_SLAVE_IDC"`
+	Addr                   string
+	Password               string
+	StartupNodes           string
+	ConnectTimeout         time.Duration
+	SlotsReloadInterval    time.Duration
+	BackendIdleConnections int
+	ReadPrefer             int
 }{}
 
 func init() {
 	flag.StringVar(&config.Addr, "addr", "0.0.0.0:8088", "proxy serving addr")
 	flag.StringVar(&config.Password, "password", "", "password for backend server, it will send this password to backend server")
-	flag.StringVar(&config.DebugAddr, "debug-addr", "", "proxy debug listen address for pprof and set log level, default not enabled")
 	flag.StringVar(&config.StartupNodes, "startup-nodes", "127.0.0.1:7001", "startup nodes used to query cluster topology")
 	flag.DurationVar(&config.ConnectTimeout, "connect-timeout", 3*time.Second, "connect to backend timeout")
 	flag.DurationVar(&config.SlotsReloadInterval, "slots-reload-interval", 3*time.Second, "slots reload interval")
@@ -37,10 +35,9 @@ func init() {
 
 func main() {
 	flag.Parse()
-
 	glog.Infof("%#v", config)
-	sigChan := make(chan os.Signal)
-	signal.Notify(sigChan, os.Interrupt, os.Kill)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	glog.Infof("pid %d", os.Getpid())
 
