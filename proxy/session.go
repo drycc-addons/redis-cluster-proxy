@@ -84,6 +84,8 @@ func (s *Session) ReadingLoop() {
 			s.handleAuthCmd(cmd)
 		} else if cmd.Name() == "SELECT" {
 			s.handleSelectCmd()
+		} else if cmd.Name() == "HELLO" {
+			s.handleHelloCmd()
 		} else if CmdUnknown(cmd) {
 			s.handleBlackCmd()
 		} else if CmdReadAll(cmd) {
@@ -246,6 +248,26 @@ func (s *Session) handleBlackCmd() {
 		ctx: plReq,
 	}
 	s.backQ <- plRsp
+}
+
+func (s *Session) handleHelloCmd() {
+	plReq := &PipelineRequest{
+		seq: s.getNextReqSeq(),
+		wg:  s.reqWg,
+	}
+	s.reqWg.Add(1)
+	rsp := &resp.Data{
+		T: resp.T_Array,
+		Array: []*resp.Data{
+			{T: resp.T_SimpleString, String: []byte("server")},
+			{T: resp.T_SimpleString, String: []byte("redis")},
+			{T: resp.T_SimpleString, String: []byte("proto")},
+			{T: resp.T_Integer, Integer: 2},
+			{T: resp.T_SimpleString, String: []byte("mode")},
+			{T: resp.T_SimpleString, String: []byte("standalone")},
+		},
+	}
+	s.backQ <- &PipelineResponse{rsp: resp.NewObjectFromData(rsp), ctx: plReq}
 }
 
 func (s *Session) handleReadAll(cmd *resp.Command) {
