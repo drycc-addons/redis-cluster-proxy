@@ -33,6 +33,7 @@ func (p *Proxy) handleConnection(cc net.Conn) {
 	session := &Session{
 		Conn:        cc,
 		r:           bufio.NewReader(cc),
+		cached:      make(map[string]map[string]string),
 		backQ:       make(chan *PipelineResponse, 1000),
 		closeSignal: &sync.WaitGroup{},
 		reqWg:       &sync.WaitGroup{},

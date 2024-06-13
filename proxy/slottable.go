@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"fmt"
+	"sort"
 
 	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
 )
@@ -54,6 +55,7 @@ func (st *SlotTable) ServerSlots() []int {
 	for _, value := range serverTable {
 		values = append(values, value)
 	}
+	sort.Ints(values)
 	return values
 }
 

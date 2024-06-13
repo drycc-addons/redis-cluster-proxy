@@ -3,6 +3,8 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"fmt"
+	"strconv"
 
 	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
 	"github.com/golang/glog"
@@ -30,14 +32,16 @@ multi key cmd被拆分成numKeys个子请求按普通的pipeline request发送�
 */
 type MultiCmd struct {
 	cmd               *resp.Command
+	session           *Session
 	numSubCmds        int
 	numPendingSubCmds int
 	subCmdRsps        []*PipelineResponse
 }
 
-func NewMultiCmd(cmd *resp.Command, numSubCmds int) *MultiCmd {
+func NewMultiCmd(session *Session, cmd *resp.Command, numSubCmds int) *MultiCmd {
 	mc := &MultiCmd{
 		cmd:               cmd,
+		session:           session,
 		numSubCmds:        numSubCmds,
 		numPendingSubCmds: numSubCmds,
 	}
@@ -60,8 +64,8 @@ func (mc *MultiCmd) Finished() bool {
 func (mc *MultiCmd) CoalesceRsp() *PipelineResponse {
 	plRsp := &PipelineResponse{}
 	var rsp *resp.Data
-	switch mc.cmd.Name() {
-	case "KEYS", "MGET":
+	switch getMultiCmdType(mc.cmd) {
+	case "SCAN", "READALL", "MGET":
 		rsp = &resp.Data{T: resp.T_Array}
 	case "MSET":
 		rsp = OK_DATA
@@ -70,7 +74,7 @@ func (mc *MultiCmd) CoalesceRsp() *PipelineResponse {
 	default:
 		panic("invalid multi key cmd name")
 	}
-	for _, subCmdRsp := range mc.subCmdRsps {
+	for index, subCmdRsp := range mc.subCmdRsps {
 		if subCmdRsp.err != nil {
 			rsp = &resp.Data{T: resp.T_Error, String: []byte(subCmdRsp.err.Error())}
 			break
@@ -86,11 +90,25 @@ func (mc *MultiCmd) CoalesceRsp() *PipelineResponse {
 			rsp = data
 			break
 		}
-		switch mc.cmd.Name() {
-		case "KEYS":
+		switch getMultiCmdType(mc.cmd) {
+		case "READALL":
 			if data.Array != nil {
 				rsp.Array = append(rsp.Array, data.Array...)
 			}
+		case "SCAN":
+			var key string
+			if index == 0 {
+				delete(mc.session.cached, fmt.Sprintf("scan:cursor:%s", mc.cmd.Value(1))) // delete old key
+				rsp.Array = append(rsp.Array, &resp.Data{T: resp.T_BulkString, String: data.Array[0].String})
+				rsp.Array = append(rsp.Array, &resp.Data{T: resp.T_Array})
+				key = fmt.Sprintf("scan:cursor:%s", string(data.Array[0].String))
+				mc.session.cached[key] = make(map[string]string)
+			} else {
+				key = fmt.Sprintf("scan:cursor:%s", string(rsp.Array[0].String))
+			}
+			subKey := fmt.Sprintf("%d", subCmdRsp.ctx.subSeq)
+			mc.session.cached[key][subKey] = string(data.Array[0].String)
+			rsp.Array[1].Array = append(rsp.Array[1].Array, data.Array[1].Array...)
 		case "MGET":
 			rsp.Array = append(rsp.Array, data)
 		case "MSET", "DEL":
@@ -103,10 +121,37 @@ func (mc *MultiCmd) CoalesceRsp() *PipelineResponse {
 	return plRsp
 }
 
+func (mc *MultiCmd) SubCmd(index int) (*resp.Command, error) {
+	switch getMultiCmdType(mc.cmd) {
+	case "MGET":
+		return resp.NewCommand("GET", mc.cmd.Value(index+1))
+	case "MSET":
+		return resp.NewCommand("SET", mc.cmd.Value(2*index+1), mc.cmd.Value((2*index + 2)))
+	case "DEL":
+		return resp.NewCommand("DEL", mc.cmd.Value(index+1))
+	case "SCAN":
+		var err error
+		var cursor int64
+		key := fmt.Sprintf("scan:cursor:%s", mc.cmd.Value(1))
+		subKey := fmt.Sprintf("%d", index)
+		if data, ok := mc.session.cached[key]; ok {
+			if data, ok := data[subKey]; ok {
+				cursor, err = strconv.ParseInt(data, 10, 64)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		return resp.NewCommand("SCAN", fmt.Sprintf("%d", cursor))
+	default:
+		return mc.cmd, nil
+	}
+}
+
 func IsMultiCmd(cmd *resp.Command) (multiKey bool, numKeys int) {
 	multiKey = true
-	switch cmd.Name() {
-	case "KEYS", "MGET":
+	switch getMultiCmdType(cmd) {
+	case "READALL", "MGET", "SCAN":
 		numKeys = len(cmd.Args) - 1
 	case "MSET":
 		numKeys = (len(cmd.Args) - 1) / 2
@@ -116,4 +161,16 @@ func IsMultiCmd(cmd *resp.Command) (multiKey bool, numKeys int) {
 		multiKey = false
 	}
 	return
+}
+
+func getMultiCmdType(cmd *resp.Command) string {
+	switch cmd.Name() {
+	case "MGET", "MSET", "DEL", "SCAN":
+		return cmd.Name()
+	default:
+		if CmdReadAll(cmd) {
+			return "READALL"
+		}
+		return cmd.Name()
+	}
 }

@@ -32,6 +32,7 @@ type Session struct {
 	rspSeq      int64
 	backQ       chan *PipelineResponse
 	closed      bool
+	cached      map[string]map[string]string
 	closeSignal *sync.WaitGroup
 	reqWg       *sync.WaitGroup
 	rspHeap     *PipelineResponseHeap
@@ -84,8 +85,6 @@ func (s *Session) ReadingLoop() {
 			s.handleAuthCmd(cmd)
 		} else if cmd.Name() == "SELECT" {
 			s.handleSelectCmd()
-		} else if cmd.Name() == "HELLO" {
-			s.handleHelloCmd()
 		} else if CmdUnknown(cmd) {
 			s.handleBlackCmd()
 		} else if CmdReadAll(cmd) {
@@ -250,33 +249,17 @@ func (s *Session) handleBlackCmd() {
 	s.backQ <- plRsp
 }
 
-func (s *Session) handleHelloCmd() {
-	plReq := &PipelineRequest{
-		seq: s.getNextReqSeq(),
-		wg:  s.reqWg,
-	}
-	s.reqWg.Add(1)
-	rsp := &resp.Data{
-		T: resp.T_Array,
-		Array: []*resp.Data{
-			{T: resp.T_SimpleString, String: []byte("server")},
-			{T: resp.T_SimpleString, String: []byte("redis")},
-			{T: resp.T_SimpleString, String: []byte("proto")},
-			{T: resp.T_Integer, Integer: 2},
-			{T: resp.T_SimpleString, String: []byte("mode")},
-			{T: resp.T_SimpleString, String: []byte("standalone")},
-		},
-	}
-	s.backQ <- &PipelineResponse{rsp: resp.NewObjectFromData(rsp), ctx: plReq}
-}
-
 func (s *Session) handleReadAll(cmd *resp.Command) {
 	seq := s.getNextReqSeq()
 	slots := s.dispatcher.slotTable.ServerSlots()
-	mc := NewMultiCmd(cmd, len(slots))
+	mc := NewMultiCmd(s, cmd, len(slots))
 	for i, slot := range slots {
+		subCmd, err := mc.SubCmd(i)
+		if err != nil {
+			panic(err)
+		}
 		plReq := &PipelineRequest{
-			cmd:       cmd,
+			cmd:       subCmd,
 			readOnly:  true,
 			slot:      slot,
 			seq:       seq,
@@ -349,20 +332,11 @@ func (s *Session) handleNoAuth() {
 }
 
 func (s *Session) handleMultiCmd(cmd *resp.Command, numKeys int) {
-	var subCmd *resp.Command
-	var err error
-	mc := NewMultiCmd(cmd, numKeys)
+	mc := NewMultiCmd(s, cmd, numKeys)
 	// multi sub cmd share the same seq number
 	seq := s.getNextReqSeq()
 	for i := 0; i < numKeys; i++ {
-		switch mc.cmd.Name() {
-		case "MGET":
-			subCmd, err = resp.NewCommand("GET", cmd.Value(i+1))
-		case "MSET":
-			subCmd, err = resp.NewCommand("SET", cmd.Value(2*i+1), cmd.Value((2*i + 2)))
-		case "DEL":
-			subCmd, err = resp.NewCommand("DEL", cmd.Value(i+1))
-		}
+		subCmd, err := mc.SubCmd(i)
 		if err != nil {
 			panic(err)
 		}
