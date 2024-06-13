@@ -254,7 +254,7 @@ func (s *Session) handleReadAll(cmd *resp.Command) {
 	slots := s.dispatcher.slotTable.ServerSlots()
 	mc := NewMultiCmd(s, cmd, len(slots))
 	for i, slot := range slots {
-		subCmd, err := mc.SubCmd(i)
+		subCmd, err := mc.SubCmd(i, len(slots))
 		if err != nil {
 			panic(err)
 		}
@@ -336,7 +336,7 @@ func (s *Session) handleMultiCmd(cmd *resp.Command, numKeys int) {
 	// multi sub cmd share the same seq number
 	seq := s.getNextReqSeq()
 	for i := 0; i < numKeys; i++ {
-		subCmd, err := mc.SubCmd(i)
+		subCmd, err := mc.SubCmd(i, numKeys)
 		if err != nil {
 			panic(err)
 		}

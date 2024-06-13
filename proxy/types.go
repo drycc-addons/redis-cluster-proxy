@@ -93,7 +93,7 @@ var cmdTable = map[string]int{
 	"SINTER":           CMD_FLAG_READ,
 	"SISMEMBER":        CMD_FLAG_READ,
 	"SLAVEOF":          CMD_FLAG_UNKNOWN,
-	"SLOWLOG":          CMD_FLAG_UNKNOWN,
+	"SLOWLOG":          CMD_FLAG_READ_ALL,
 	"SMEMBERS":         CMD_FLAG_READ,
 	"SRANDMEMBER":      CMD_FLAG_READ,
 	"SSCAN":            CMD_FLAG_READ,

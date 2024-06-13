@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"strconv"
+	"strings"
 
 	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
 	"github.com/golang/glog"
@@ -62,18 +63,7 @@ func (mc *MultiCmd) Finished() bool {
 }
 
 func (mc *MultiCmd) CoalesceRsp() *PipelineResponse {
-	plRsp := &PipelineResponse{}
-	var rsp *resp.Data
-	switch getMultiCmdType(mc.cmd) {
-	case "SCAN", "READALL", "MGET":
-		rsp = &resp.Data{T: resp.T_Array}
-	case "MSET":
-		rsp = OK_DATA
-	case "DEL":
-		rsp = &resp.Data{T: resp.T_Integer}
-	default:
-		panic("invalid multi key cmd name")
-	}
+	rsp := mc.newRespData()
 	for index, subCmdRsp := range mc.subCmdRsps {
 		if subCmdRsp.err != nil {
 			rsp = &resp.Data{T: resp.T_Error, String: []byte(subCmdRsp.err.Error())}
@@ -91,24 +81,14 @@ func (mc *MultiCmd) CoalesceRsp() *PipelineResponse {
 			break
 		}
 		switch getMultiCmdType(mc.cmd) {
+		case "SLOWLOG":
+			rsp = mc.coalesceSlowlogRsp(rsp, data)
 		case "READALL":
 			if data.Array != nil {
 				rsp.Array = append(rsp.Array, data.Array...)
 			}
 		case "SCAN":
-			var key string
-			if index == 0 {
-				delete(mc.session.cached, fmt.Sprintf("scan:cursor:%s", mc.cmd.Value(1))) // delete old key
-				rsp.Array = append(rsp.Array, &resp.Data{T: resp.T_BulkString, String: data.Array[0].String})
-				rsp.Array = append(rsp.Array, &resp.Data{T: resp.T_Array})
-				key = fmt.Sprintf("scan:cursor:%s", string(data.Array[0].String))
-				mc.session.cached[key] = make(map[string]string)
-			} else {
-				key = fmt.Sprintf("scan:cursor:%s", string(rsp.Array[0].String))
-			}
-			subKey := fmt.Sprintf("%d", subCmdRsp.ctx.subSeq)
-			mc.session.cached[key][subKey] = string(data.Array[0].String)
-			rsp.Array[1].Array = append(rsp.Array[1].Array, data.Array[1].Array...)
+			rsp = mc.coalesceScanRsp(index, subCmdRsp, rsp, data)
 		case "MGET":
 			rsp.Array = append(rsp.Array, data)
 		case "MSET", "DEL":
@@ -117,11 +97,25 @@ func (mc *MultiCmd) CoalesceRsp() *PipelineResponse {
 			panic("invalid multi key cmd name")
 		}
 	}
-	plRsp.rsp = resp.NewObjectFromData(rsp)
-	return plRsp
+	return &PipelineResponse{rsp: resp.NewObjectFromData(rsp)}
 }
 
-func (mc *MultiCmd) SubCmd(index int) (*resp.Command, error) {
+func (mc *MultiCmd) newRespData() *resp.Data {
+	var rsp *resp.Data
+	switch getMultiCmdType(mc.cmd) {
+	case "SLOWLOG", "SCAN", "READALL", "MGET":
+		rsp = &resp.Data{T: resp.T_Array}
+	case "MSET":
+		rsp = OK_DATA
+	case "DEL":
+		rsp = &resp.Data{T: resp.T_Integer}
+	default:
+		panic("invalid multi key cmd name")
+	}
+	return rsp
+}
+
+func (mc *MultiCmd) SubCmd(index, size int) (*resp.Command, error) {
 	switch getMultiCmdType(mc.cmd) {
 	case "MGET":
 		return resp.NewCommand("GET", mc.cmd.Value(index+1))
@@ -148,10 +142,55 @@ func (mc *MultiCmd) SubCmd(index int) (*resp.Command, error) {
 	}
 }
 
+func (mc *MultiCmd) coalesceSlowlogRsp(rsp, data *resp.Data) *resp.Data {
+	subCmd := strings.ToUpper(string(mc.cmd.Value(1)))
+	switch subCmd {
+	case "GET":
+		if data.Array != nil {
+			rsp.Array = append(rsp.Array, data.Array...)
+		}
+		if len(mc.cmd.Args) == 3 {
+			count, err := strconv.Atoi(mc.cmd.Value(2))
+			if err != nil {
+				panic(err)
+			}
+			if len(rsp.Array) > count {
+				rsp.Array = rsp.Array[:count]
+			}
+		}
+	case "LEN":
+		rsp.T = data.T
+		rsp.Integer += data.Integer
+	case "RESET":
+		rsp = OK_DATA
+	case "HELP":
+		rsp.T = data.T
+		rsp.Array = data.Array
+	}
+	return rsp
+}
+
+func (mc *MultiCmd) coalesceScanRsp(index int, subCmdRsp *PipelineResponse, rsp, data *resp.Data) *resp.Data {
+	var key string
+	if index == 0 {
+		delete(mc.session.cached, fmt.Sprintf("scan:cursor:%s", mc.cmd.Value(1))) // delete old key
+		rsp.Array = append(rsp.Array, &resp.Data{T: resp.T_BulkString, String: data.Array[0].String})
+		rsp.Array = append(rsp.Array, &resp.Data{T: resp.T_Array})
+		key = fmt.Sprintf("scan:cursor:%s", string(data.Array[0].String))
+		mc.session.cached[key] = make(map[string]string)
+	} else {
+		key = fmt.Sprintf("scan:cursor:%s", string(rsp.Array[0].String))
+	}
+	subKey := fmt.Sprintf("%d", subCmdRsp.ctx.subSeq)
+	mc.session.cached[key][subKey] = string(data.Array[0].String)
+	rsp.Array[1].Array = append(rsp.Array[1].Array, data.Array[1].Array...)
+	return rsp
+}
+
 func IsMultiCmd(cmd *resp.Command) (multiKey bool, numKeys int) {
 	multiKey = true
 	switch getMultiCmdType(cmd) {
-	case "READALL", "MGET", "SCAN":
+	case "SLOWLOG", "READALL", "MGET", "SCAN":
 		numKeys = len(cmd.Args) - 1
 	case "MSET":
 		numKeys = (len(cmd.Args) - 1) / 2
@@ -165,7 +204,7 @@ func IsMultiCmd(cmd *resp.Command) (multiKey bool, numKeys int) {
 
 func getMultiCmdType(cmd *resp.Command) string {
 	switch cmd.Name() {
-	case "MGET", "MSET", "DEL", "SCAN":
+	case "SLOWLOG", "MGET", "MSET", "DEL", "SCAN":
 		return cmd.Name()
 	default:
 		if CmdReadAll(cmd) {
