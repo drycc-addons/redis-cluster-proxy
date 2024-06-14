@@ -70,7 +70,7 @@ var cmdTable = map[string]int{
 	"OBJECT":           CMD_FLAG_UNKNOWN,
 	"PFCOUNT":          CMD_FLAG_READ,
 	"PFSELFTEST":       CMD_FLAG_READ,
-	"PING":             CMD_FLAG_UNKNOWN,
+	"PING":             CMD_FLAG_READ,
 	"PSUBSCRIBE":       CMD_FLAG_UNKNOWN,
 	"PSYNC":            CMD_FLAG_READ,
 	"PTTL":             CMD_FLAG_READ,
