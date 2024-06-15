@@ -11,17 +11,6 @@ import (
 	"github.com/golang/glog"
 )
 
-var (
-	OK_DATA *resp.Data
-)
-
-func init() {
-	OK_DATA = &resp.Data{
-		T:      resp.T_SimpleString,
-		String: []byte("OK"),
-	}
-}
-
 /*
 multi key cmd被拆分成numKeys个子请求按普通的pipeline request发送，最后在写出response时进行合并
 当最后一个子请求的response到来时，整个multi key cmd完成，拼接最终response并写出
@@ -89,7 +78,7 @@ func (mc *MultiCmd) CoalesceRsp() *PipelineResponse {
 			}
 		case "SCAN":
 			rsp = mc.coalesceScanRsp(index, subCmdRsp, rsp, data)
-		case "MGET":
+		case "EXEC", "MGET":
 			rsp.Array = append(rsp.Array, data)
 		case "MSET", "DEL":
 			rsp.Integer += data.Integer
@@ -103,7 +92,7 @@ func (mc *MultiCmd) CoalesceRsp() *PipelineResponse {
 func (mc *MultiCmd) newRespData() *resp.Data {
 	var rsp *resp.Data
 	switch getMultiCmdType(mc.cmd) {
-	case "SLOWLOG", "SCAN", "READALL", "MGET":
+	case "EXEC", "SLOWLOG", "SCAN", "READALL", "MGET":
 		rsp = &resp.Data{T: resp.T_Array}
 	case "MSET":
 		rsp = OK_DATA
@@ -190,7 +179,7 @@ func (mc *MultiCmd) coalesceScanRsp(index int, subCmdRsp *PipelineResponse, rsp,
 func IsMultiCmd(cmd *resp.Command) (multiKey bool, numKeys int) {
 	multiKey = true
 	switch getMultiCmdType(cmd) {
-	case "SLOWLOG", "READALL", "MGET", "SCAN":
+	case "EXEC", "SLOWLOG", "READALL", "MGET", "SCAN":
 		numKeys = len(cmd.Args) - 1
 	case "MSET":
 		numKeys = (len(cmd.Args) - 1) / 2
@@ -204,7 +193,7 @@ func IsMultiCmd(cmd *resp.Command) (multiKey bool, numKeys int) {
 
 func getMultiCmdType(cmd *resp.Command) string {
 	switch cmd.Name() {
-	case "SLOWLOG", "MGET", "MSET", "DEL", "SCAN":
+	case "EXEC", "SLOWLOG", "MGET", "MSET", "DEL", "SCAN":
 		return cmd.Name()
 	default:
 		if CmdReadAll(cmd) {

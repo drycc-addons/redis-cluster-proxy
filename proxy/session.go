@@ -15,6 +15,7 @@ import (
 )
 
 var (
+	OK              = []byte("OK")
 	MOVED           = []byte("-MOVED")
 	ASK             = []byte("-ASK")
 	ASK_CMD_BYTES   = []byte("+ASKING\r\n")
@@ -22,6 +23,7 @@ var (
 	UNKNOWN_CMD_ERR = []byte("ERR unknown command")
 	ARGUMENTS_ERR   = []byte("ERR wrong number of arguments")
 	NOAUTH_ERR      = []byte("NOAUTH Authentication required.")
+	OK_DATA         = &resp.Data{T: resp.T_SimpleString, String: OK}
 )
 
 type Session struct {
@@ -38,6 +40,8 @@ type Session struct {
 	rspHeap     *PipelineResponseHeap
 	redisProxy  *RedisProxy
 	dispatcher  *Dispatcher
+	multiCmd    []*resp.Command
+	multiCmdErr bool
 }
 
 func (s *Session) Run() {
@@ -79,27 +83,35 @@ func (s *Session) ReadingLoop() {
 		} else {
 			glog.Infof("access %s %s", s.RemoteAddr(), cmd.Name())
 		}
-		if CmdAuthRequired(cmd) && !s.checkAuth() {
-			s.handleNoAuth()
-		} else if cmd.Name() == "AUTH" {
-			s.handleAuthCmd(cmd)
-		} else if cmd.Name() == "SELECT" {
-			s.handleSelectCmd()
-		} else if CmdUnknown(cmd) {
-			s.handleBlackCmd()
-		} else if CmdReadAll(cmd) {
-			s.handleReadAll(cmd)
-		} else if yes, numKeys := IsMultiCmd(cmd); yes && numKeys > 1 {
-			s.handleMultiCmd(cmd, numKeys)
-		} else { // other general cmd
-			s.handleGeneralCmd(cmd)
-		}
+		s.handle(cmd)
 	}
 	// wait for all request done
 	s.reqWg.Wait()
 	// notify writer
 	close(s.backQ)
 	s.closeSignal.Wait()
+}
+
+func (s *Session) handle(cmd *resp.Command) {
+	if CmdAuthRequired(cmd) && !s.checkAuth() {
+		s.handleErrorCmd(NOAUTH_ERR)
+	} else if cmd.Name() == "MULTI" || s.multiCmd != nil || cmd.Name() == "EXEC" {
+		s.handleMultiCmd(cmd)
+	} else if cmd.Name() == "AUTH" {
+		s.handleAuthCmd(cmd)
+	} else if cmd.Name() == "SELECT" {
+		s.handleSimpleStringCmd(OK)
+	} else if cmd.Name() == "PING" {
+		s.handleSimpleStringCmd([]byte("PONG"))
+	} else if CmdUnknown(cmd) {
+		s.handleErrorCmd(UNKNOWN_CMD_ERR)
+	} else if CmdReadAll(cmd) {
+		s.handleReadAll(cmd)
+	} else if yes, numKeys := IsMultiCmd(cmd); yes && numKeys > 1 {
+		s.handleMultiKeyCmd(cmd, numKeys)
+	} else { // other general cmd
+		s.handleGeneralCmd(cmd)
+	}
 }
 
 // 将resp写出去。如果是multi key command，只有在全部完成后才汇总输出
@@ -235,13 +247,58 @@ func (s *Session) handleRespPipeline(plRsp *PipelineResponse) error {
 	}
 }
 
-func (s *Session) handleBlackCmd() {
+func (s *Session) handleMultiCmd(cmd *resp.Command) {
+	if cmd.Name() == "MULTI" {
+		if s.multiCmd != nil {
+			s.handleErrorCmd([]byte("ERR MULTI calls can not be nested"))
+		} else {
+			s.multiCmd = []*resp.Command{}
+			s.handleSimpleStringCmd(OK)
+		}
+	} else if cmd.Name() == "EXEC" {
+		if s.multiCmd == nil {
+			s.handleErrorCmd([]byte("ERR EXEC without MULTI"))
+		} else if s.multiCmdErr {
+			s.multiCmdErr = false
+			s.handleErrorCmd([]byte("EXECABORT Transaction discarded"))
+		} else {
+			seq := s.getNextReqSeq()
+			mc := NewMultiCmd(s, cmd, len(s.multiCmd))
+			for index, subCmd := range s.multiCmd {
+				plReq := &PipelineRequest{
+					cmd:       subCmd,
+					readOnly:  CmdReadOnly(subCmd),
+					slot:      Key2Slot(cmd.Value(1)),
+					seq:       seq,
+					subSeq:    index,
+					backQ:     s.backQ,
+					parentCmd: mc,
+					wg:        s.reqWg,
+				}
+				s.reqWg.Add(1)
+				s.dispatcher.Schedule(plReq)
+			}
+		}
+		s.multiCmd = nil
+	} else {
+		flag := CmdFlag(cmd)
+		if flag == CMD_FLAG_GENERAL || flag == CMD_FLAG_READ {
+			s.multiCmd = append(s.multiCmd, cmd)
+			s.handleSimpleStringCmd([]byte("QUEUED"))
+		} else {
+			s.multiCmdErr = true
+			s.handleErrorCmd([]byte(UNKNOWN_CMD_ERR))
+		}
+	}
+}
+
+func (s *Session) handleErrorCmd(msg []byte) {
 	plReq := &PipelineRequest{
 		seq: s.getNextReqSeq(),
 		wg:  s.reqWg,
 	}
 	s.reqWg.Add(1)
-	rsp := &resp.Data{T: resp.T_Error, String: UNKNOWN_CMD_ERR}
+	rsp := &resp.Data{T: resp.T_Error, String: msg}
 	plRsp := &PipelineResponse{
 		rsp: resp.NewObjectFromData(rsp),
 		ctx: plReq,
@@ -274,27 +331,22 @@ func (s *Session) handleReadAll(cmd *resp.Command) {
 }
 
 func (s *Session) handleAuthCmd(cmd *resp.Command) {
-	rsp := resp.NewObjectFromData(&resp.Data{T: resp.T_Error, String: AUTH_CMD_ERR})
 	if len(cmd.Args) == 2 {
 		if s.redisProxy.Auth(cmd.Args[1]) {
-			rsp = resp.NewObjectFromData(OK_DATA)
+			s.handleSimpleStringCmd(OK)
 			s.auth = true
+		} else {
+			s.handleErrorCmd(AUTH_CMD_ERR)
 		}
 	} else {
-		rsp = resp.NewObjectFromData(&resp.Data{T: resp.T_Error, String: ARGUMENTS_ERR})
+		s.handleErrorCmd(ARGUMENTS_ERR)
 	}
-	s.reqWg.Add(1)
-	plRsp := &PipelineResponse{
-		rsp: rsp,
-		ctx: &PipelineRequest{seq: s.getNextReqSeq(), wg: s.reqWg},
-	}
-	s.backQ <- plRsp
 }
 
-func (s *Session) handleSelectCmd() {
+func (s *Session) handleSimpleStringCmd(msg []byte) {
 	s.reqWg.Add(1)
 	plRsp := &PipelineResponse{
-		rsp: resp.NewObjectFromData(OK_DATA),
+		rsp: resp.NewObjectFromData(&resp.Data{T: resp.T_SimpleString, String: msg}),
 		ctx: &PipelineRequest{
 			seq: s.getNextReqSeq(),
 			wg:  s.reqWg,
@@ -319,19 +371,7 @@ func (s *Session) handleGeneralCmd(cmd *resp.Command) {
 	s.dispatcher.Schedule(plReq)
 }
 
-func (s *Session) handleNoAuth() {
-	s.reqWg.Add(1)
-	plRsp := &PipelineResponse{
-		rsp: resp.NewObjectFromData(&resp.Data{T: resp.T_Error, String: NOAUTH_ERR}),
-		ctx: &PipelineRequest{
-			seq: s.getNextReqSeq(),
-			wg:  s.reqWg,
-		},
-	}
-	s.backQ <- plRsp
-}
-
-func (s *Session) handleMultiCmd(cmd *resp.Command, numKeys int) {
+func (s *Session) handleMultiKeyCmd(cmd *resp.Command, numKeys int) {
 	mc := NewMultiCmd(s, cmd, numKeys)
 	// multi sub cmd share the same seq number
 	seq := s.getNextReqSeq()

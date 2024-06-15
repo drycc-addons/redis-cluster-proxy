@@ -7,6 +7,7 @@ import (
 const (
 	CMD_FLAG_READ = iota
 	CMD_FLAG_READ_ALL
+	CMD_FLAG_PROXY
 	CMD_FLAG_UNKNOWN
 	CMD_FLAG_GENERAL
 )
@@ -15,13 +16,14 @@ const (
 *
 CMD_FLAG_READ stands for read command
 CMD_FLAG_READ_ALL stands for read all command
-CMD_FLAG_UNSUPPORT stands for unsupport command
+CMD_FLAG_PROXY stands for proxy command
+CMD_FLAG_UNKNOWN stands for unknown command
 CMD_FLAG_GENERAL stands for general command
 */
 var cmdTable = map[string]int{
 	"HELLO":            CMD_FLAG_UNKNOWN,
 	"ASKING":           CMD_FLAG_UNKNOWN,
-	"AUTH":             CMD_FLAG_READ,
+	"AUTH":             CMD_FLAG_PROXY,
 	"BGREWRITEAOF":     CMD_FLAG_UNKNOWN,
 	"BGSAVE":           CMD_FLAG_UNKNOWN,
 	"BITCOUNT":         CMD_FLAG_READ,
@@ -39,7 +41,7 @@ var cmdTable = map[string]int{
 	"DISCARD":          CMD_FLAG_UNKNOWN,
 	"DUMP":             CMD_FLAG_READ,
 	"ECHO":             CMD_FLAG_UNKNOWN,
-	"EXEC":             CMD_FLAG_UNKNOWN,
+	"EXEC":             CMD_FLAG_READ_ALL,
 	"EXISTS":           CMD_FLAG_READ,
 	"FLUSHALL":         CMD_FLAG_UNKNOWN,
 	"FLUSHDB":          CMD_FLAG_UNKNOWN,
@@ -66,11 +68,11 @@ var cmdTable = map[string]int{
 	"MONITOR":          CMD_FLAG_UNKNOWN,
 	"MOVE":             CMD_FLAG_UNKNOWN,
 	"MSETNX":           CMD_FLAG_UNKNOWN,
-	"MULTI":            CMD_FLAG_UNKNOWN,
+	"MULTI":            CMD_FLAG_READ_ALL,
 	"OBJECT":           CMD_FLAG_UNKNOWN,
 	"PFCOUNT":          CMD_FLAG_READ,
 	"PFSELFTEST":       CMD_FLAG_READ,
-	"PING":             CMD_FLAG_READ,
+	"PING":             CMD_FLAG_PROXY,
 	"PSUBSCRIBE":       CMD_FLAG_UNKNOWN,
 	"PSYNC":            CMD_FLAG_READ,
 	"PTTL":             CMD_FLAG_READ,
@@ -88,7 +90,7 @@ var cmdTable = map[string]int{
 	"SCARD":            CMD_FLAG_READ,
 	"SCRIPT":           CMD_FLAG_UNKNOWN,
 	"SDIFF":            CMD_FLAG_READ,
-	"SELECT":           CMD_FLAG_READ,
+	"SELECT":           CMD_FLAG_PROXY,
 	"SHUTDOWN":         CMD_FLAG_UNKNOWN,
 	"SINTER":           CMD_FLAG_READ,
 	"SISMEMBER":        CMD_FLAG_READ,
