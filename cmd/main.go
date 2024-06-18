@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ var config = struct {
 	SlotsReloadInterval    time.Duration
 	BackendIdleConnections int
 	ReadPrefer             int
+	TaskRunners            int
 }{}
 
 func init() {
@@ -31,6 +33,7 @@ func init() {
 	flag.DurationVar(&config.SlotsReloadInterval, "slots-reload-interval", 3*time.Second, "slots reload interval")
 	flag.IntVar(&config.BackendIdleConnections, "backend-idle-connections", 5, "max number of idle connections for each backend server")
 	flag.IntVar(&config.ReadPrefer, "read-prefer", proxy.READ_PREFER_MASTER, "where read command to send to, eg. READ_PREFER_MASTER, READ_PREFER_SLAVE, READ_PREFER_SLAVE_IDC")
+	flag.IntVar(&config.TaskRunners, "task-runners", runtime.NumCPU(), "number of goroutine for task runners")
 }
 
 func main() {
@@ -54,7 +57,7 @@ func main() {
 		glog.Fatal(err)
 	}
 	proxy := proxy.NewProxy(config.Addr, dispatcher, redisProxy)
-	go proxy.Run()
+	go proxy.Run(config.TaskRunners)
 	sig := <-sigChan
 	glog.Infof("terminated by %#v", sig)
 	proxy.Exit()

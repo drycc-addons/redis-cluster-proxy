@@ -44,7 +44,7 @@ func (p *Proxy) handleConnection(cc net.Conn) {
 	session.Run()
 }
 
-func (p *Proxy) Run() {
+func (p *Proxy) Run(tasks int) {
 	tcpAddr, err := net.ResolveTCPAddr("tcp", p.addr)
 	if err != nil {
 		glog.Fatal(err)
@@ -57,8 +57,9 @@ func (p *Proxy) Run() {
 		glog.Infof("proxy listens on %s", p.addr)
 	}
 	defer listener.Close()
-
-	go p.dispatcher.Run()
+	for i := 0; i < tasks; i++ {
+		go p.dispatcher.Run()
+	}
 
 	for {
 		conn, err := listener.AcceptTCP()

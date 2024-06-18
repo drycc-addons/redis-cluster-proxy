@@ -79,6 +79,7 @@ func NewTaskRunner(server string, redisProxy *RedisProxy) *TaskRunner {
 		tr.initRWConn(conn)
 	}
 
+	go tr.backingLoop()
 	go tr.writingLoop()
 	go tr.readingLoop(tr.out)
 
@@ -111,9 +112,18 @@ func (tr *TaskRunner) readingLoop(out chan interface{}) {
 	}
 }
 
+func (tr *TaskRunner) backingLoop() {
+	for rsp := range tr.out {
+		if err := tr.handleResp(rsp); err != nil {
+			if err := tr.tryRecover(err); err != nil {
+				glog.Error("try recover err", err)
+			}
+		}
+	}
+}
+
 func (tr *TaskRunner) writingLoop() {
-	var err error
-	for {
+	for req := range tr.in {
 		if tr.closed && tr.inflight.Len() == 0 {
 			// in queue和out queue都已经空了，writing loop可以退出了
 			if tr.conn != nil {
@@ -121,21 +131,12 @@ func (tr *TaskRunner) writingLoop() {
 				tr.conn.Close()
 			}
 			close(tr.in)
-			glog.Error("exit writing loop", tr.server, err)
+			glog.Error("exit writing loop", tr.server)
 			return
 		}
-		if err != nil {
-			err = tr.tryRecover(err)
-			if err != nil {
-				continue
-			}
-		}
-		select {
-		case req := <-tr.in:
-			err = tr.handleReq(req)
-		case rsp, ok := <-tr.out:
-			if ok {
-				err = tr.handleResp(rsp)
+		if err := tr.handleReq(req); err != nil {
+			if err := tr.tryRecover(err); err != nil {
+				glog.Error("try recover err", err)
 			}
 		}
 	}
