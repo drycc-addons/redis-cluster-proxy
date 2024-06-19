@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -22,7 +21,6 @@ var config = struct {
 	SlotsReloadInterval    time.Duration
 	BackendIdleConnections int
 	ReadPrefer             int
-	TaskRunners            int
 }{}
 
 func init() {
@@ -33,7 +31,6 @@ func init() {
 	flag.DurationVar(&config.SlotsReloadInterval, "slots-reload-interval", 3*time.Second, "slots reload interval")
 	flag.IntVar(&config.BackendIdleConnections, "backend-idle-connections", 5, "max number of idle connections for each backend server")
 	flag.IntVar(&config.ReadPrefer, "read-prefer", proxy.READ_PREFER_MASTER, "where read command to send to, eg. READ_PREFER_MASTER, READ_PREFER_SLAVE, READ_PREFER_SLAVE_IDC")
-	flag.IntVar(&config.TaskRunners, "task-runners", runtime.NumCPU(), "number of goroutine for task runners")
 }
 
 func main() {
@@ -51,13 +48,17 @@ func main() {
 		startupNodes[i] = startupNodes[indexes[i]]
 		startupNodes[indexes[i]] = startupNode
 	}
-	redisProxy := proxy.NewRedisProxy(config.BackendIdleConnections, config.ConnectTimeout, config.Password, config.ReadPrefer != proxy.READ_PREFER_MASTER)
-	dispatcher := proxy.NewDispatcher(startupNodes, config.SlotsReloadInterval, redisProxy, config.ReadPrefer)
+	conn := proxy.NewRedisConn(config.BackendIdleConnections, config.ConnectTimeout, config.Password, config.ReadPrefer != proxy.READ_PREFER_MASTER)
+
+	dispatcher := proxy.NewDispatcher(startupNodes, config.SlotsReloadInterval, conn, config.ReadPrefer)
 	if err := dispatcher.InitSlotTable(); err != nil {
 		glog.Fatal(err)
 	}
-	proxy := proxy.NewProxy(config.Addr, dispatcher, redisProxy)
-	go proxy.Run(config.TaskRunners)
+	go dispatcher.Run()
+
+	proxy := proxy.NewProxy(config.Addr, dispatcher, conn)
+	go proxy.Run()
+
 	sig := <-sigChan
 	glog.Infof("terminated by %#v", sig)
 	proxy.Exit()

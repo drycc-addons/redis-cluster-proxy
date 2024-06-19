@@ -11,15 +11,15 @@ import (
 type Proxy struct {
 	addr       string
 	dispatcher *Dispatcher
-	redisProxy *RedisProxy
+	redisConn  *RedisConn
 	exitChan   chan struct{}
 }
 
-func NewProxy(addr string, dispatcher *Dispatcher, redisProxy *RedisProxy) *Proxy {
+func NewProxy(addr string, dispatcher *Dispatcher, redisConn *RedisConn) *Proxy {
 	p := &Proxy{
 		addr:       addr,
 		dispatcher: dispatcher,
-		redisProxy: redisProxy,
+		redisConn:  redisConn,
 		exitChan:   make(chan struct{}),
 	}
 	return p
@@ -31,20 +31,21 @@ func (p *Proxy) Exit() {
 
 func (p *Proxy) handleConnection(cc net.Conn) {
 	session := &Session{
-		Conn:        cc,
-		r:           bufio.NewReader(cc),
-		cached:      make(map[string]map[string]string),
-		backQ:       make(chan *PipelineResponse, 1000),
-		closeSignal: &sync.WaitGroup{},
-		reqWg:       &sync.WaitGroup{},
-		redisProxy:  p.redisProxy,
-		dispatcher:  p.dispatcher,
-		rspHeap:     &PipelineResponseHeap{},
+		Conn:           cc,
+		r:              bufio.NewReader(cc),
+		cached:         make(map[string]map[string]string),
+		backQ:          make(chan *PipelineResponse, 1000),
+		closeSignal:    &sync.WaitGroup{},
+		reqWg:          &sync.WaitGroup{},
+		redisConn:      p.redisConn,
+		dispatcher:     p.dispatcher,
+		rspHeap:        &PipelineResponseHeap{},
+		backendServers: make(map[string]*BackendServer),
 	}
 	session.Run()
 }
 
-func (p *Proxy) Run(tasks int) {
+func (p *Proxy) Run() {
 	tcpAddr, err := net.ResolveTCPAddr("tcp", p.addr)
 	if err != nil {
 		glog.Fatal(err)
@@ -57,9 +58,6 @@ func (p *Proxy) Run(tasks int) {
 		glog.Infof("proxy listens on %s", p.addr)
 	}
 	defer listener.Close()
-	for i := 0; i < tasks; i++ {
-		go p.dispatcher.Run()
-	}
 
 	for {
 		conn, err := listener.AcceptTCP()

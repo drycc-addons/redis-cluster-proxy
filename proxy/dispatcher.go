@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net"
+	"slices"
 	"time"
 
 	"bufio"
@@ -9,7 +10,6 @@ import (
 	"math/rand"
 	"strings"
 
-	"github.com/drycc-addons/redis-cluster-proxy/pool"
 	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
 	"github.com/golang/glog"
 )
@@ -48,23 +48,20 @@ type Dispatcher struct {
 	startupNodes       []string
 	slotTable          *SlotTable
 	slotReloadInterval time.Duration
-	reqCh              chan *PipelineRequest
-	redisProxy         *RedisProxy
-	taskRunners        map[string]*TaskRunner
+	redisConn          *RedisConn
 	// notify slots changed
 	slotInfoChan   chan []*SlotInfo
 	slotReloadChan chan struct{}
 	readPrefer     int
+	sessions       []*Session
 }
 
-func NewDispatcher(startupNodes []string, slotReloadInterval time.Duration, redisProxy *RedisProxy, readPrefer int) *Dispatcher {
+func NewDispatcher(startupNodes []string, slotReloadInterval time.Duration, redisConn *RedisConn, readPrefer int) *Dispatcher {
 	d := &Dispatcher{
 		startupNodes:       startupNodes,
 		slotTable:          NewSlotTable(),
 		slotReloadInterval: slotReloadInterval,
-		reqCh:              make(chan *PipelineRequest, 10000),
-		redisProxy:         redisProxy,
-		taskRunners:        make(map[string]*TaskRunner),
+		redisConn:          redisConn,
 		slotInfoChan:       make(chan []*SlotInfo),
 		slotReloadChan:     make(chan struct{}, 1),
 		readPrefer:         readPrefer,
@@ -85,30 +82,8 @@ func (d *Dispatcher) InitSlotTable() error {
 
 func (d *Dispatcher) Run() {
 	go d.slotsReloadLoop()
-	for {
-		select {
-		case req, ok := <-d.reqCh:
-			// dispatch req
-			if !ok {
-				glog.Info("exit dispatch loop")
-				return
-			}
-			var server string
-			if req.readOnly {
-				server = d.slotTable.ReadServer(req.slot)
-			} else {
-				server = d.slotTable.WriteServer(req.slot)
-			}
-			taskRunner, ok := d.taskRunners[server]
-			if !ok {
-				glog.Info("create task runner", server)
-				taskRunner = NewTaskRunner(server, d.redisProxy)
-				d.taskRunners[server] = taskRunner
-			}
-			taskRunner.in <- req
-		case info := <-d.slotInfoChan:
-			d.handleSlotInfoChanged(info)
-		}
+	for info := range d.slotInfoChan {
+		d.handleSlotInfoChanged(info)
 	}
 }
 
@@ -122,18 +97,20 @@ func (d *Dispatcher) handleSlotInfoChanged(slotInfos []*SlotInfo) {
 			newServers[read] = true
 		}
 	}
-
-	for server, tr := range d.taskRunners {
-		if _, ok := newServers[server]; !ok {
-			glog.Infof("exit unused task runner %s", server)
-			tr.Exit()
-			delete(d.taskRunners, server)
-		}
+	for _, s := range d.sessions {
+		s.Reload(newServers)
 	}
 }
 
-func (d *Dispatcher) Schedule(req *PipelineRequest) {
-	d.reqCh <- req
+func (d *Dispatcher) AddEvent(session *Session) {
+	d.sessions = append(d.sessions, session)
+
+}
+
+func (d *Dispatcher) RemoveEvent(session *Session) {
+	d.sessions = slices.DeleteFunc(d.sessions, func(s *Session) bool {
+		return s == session
+	})
 }
 
 // wait for the slot reload chan and reload cluster topology
@@ -184,19 +161,14 @@ func (d *Dispatcher) reloadTopology() (slotInfos []*SlotInfo, err error) {
 */
 func (d *Dispatcher) doReload(server string) (slotInfos []*SlotInfo, err error) {
 	var conn net.Conn
-	conn, err = d.redisProxy.Get(server)
+	conn, err = d.redisConn.Conn(server)
 	if err != nil {
 		glog.Error(server, err)
 		return
 	} else {
 		glog.Infof("query cluster slots from %s", server)
 	}
-	defer func() {
-		if err != nil {
-			conn.(*pool.PoolConn).MarkUnusable()
-		}
-		conn.Close()
-	}()
+	defer conn.Close()
 	_, err = conn.Write(REDIS_CMD_CLUSTER_SLOTS.Format())
 	if err != nil {
 		glog.Errorf("write cluster slots error, server=%s, err=%v", server, err)
@@ -281,7 +253,4 @@ func (d *Dispatcher) TriggerReloadSlots() {
 	case d.slotReloadChan <- struct{}{}:
 	default:
 	}
-}
-func (d *Dispatcher) Exit() {
-	close(d.reqCh)
 }

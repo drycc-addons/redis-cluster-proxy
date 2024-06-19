@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"container/heap"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/drycc-addons/redis-cluster-proxy/pool"
 	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
 	"github.com/golang/glog"
 )
@@ -28,24 +28,26 @@ var (
 
 type Session struct {
 	net.Conn
-	r           *bufio.Reader
-	auth        bool
-	reqSeq      int64
-	rspSeq      int64
-	backQ       chan *PipelineResponse
-	closed      bool
-	cached      map[string]map[string]string
-	closeSignal *sync.WaitGroup
-	reqWg       *sync.WaitGroup
-	rspHeap     *PipelineResponseHeap
-	redisProxy  *RedisProxy
-	dispatcher  *Dispatcher
-	multiCmd    []*resp.Command
-	multiCmdErr bool
+	r              *bufio.Reader
+	auth           bool
+	reqSeq         int64
+	rspSeq         int64
+	backQ          chan *PipelineResponse
+	closed         bool
+	cached         map[string]map[string]string
+	closeSignal    *sync.WaitGroup
+	reqWg          *sync.WaitGroup
+	rspHeap        *PipelineResponseHeap
+	redisConn      *RedisConn
+	dispatcher     *Dispatcher
+	multiCmd       *[]*resp.Command
+	multiCmdErr    bool
+	backendServers map[string]*BackendServer
 }
 
 func (s *Session) Run() {
 	s.closeSignal.Add(1)
+	s.dispatcher.AddEvent(s)
 	go s.WritingLoop()
 	s.ReadingLoop()
 }
@@ -65,7 +67,7 @@ func (s *Session) WritingLoop() {
 }
 
 func (s *Session) checkAuth() bool {
-	return s.auth || s.redisProxy.Auth("")
+	return s.auth || s.redisConn.Auth("")
 }
 
 func (s *Session) ReadingLoop() {
@@ -143,7 +145,7 @@ func (s *Session) redirect(server string, plRsp *PipelineResponse, ask bool) {
 	var err error
 
 	plRsp.err = nil
-	conn, err = s.redisProxy.Get(server)
+	conn, err = s.redisConn.Conn(server)
 	if err != nil {
 		glog.Error(err)
 		plRsp.err = err
@@ -152,7 +154,6 @@ func (s *Session) redirect(server string, plRsp *PipelineResponse, ask bool) {
 	defer func() {
 		if err != nil {
 			glog.Error(err)
-			conn.(*pool.PoolConn).MarkUnusable()
 		}
 		conn.Close()
 	}()
@@ -252,7 +253,7 @@ func (s *Session) handleMultiCmd(cmd *resp.Command) {
 		if s.multiCmd != nil {
 			s.handleErrorCmd([]byte("ERR MULTI calls can not be nested"))
 		} else {
-			s.multiCmd = []*resp.Command{}
+			s.multiCmd = &[]*resp.Command{}
 			s.handleSimpleStringCmd(OK)
 		}
 	} else if cmd.Name() == "EXEC" {
@@ -262,28 +263,24 @@ func (s *Session) handleMultiCmd(cmd *resp.Command) {
 			s.multiCmdErr = false
 			s.handleErrorCmd([]byte("EXECABORT Transaction discarded"))
 		} else {
-			seq := s.getNextReqSeq()
-			mc := NewMultiCmd(s, cmd, len(s.multiCmd))
-			for index, subCmd := range s.multiCmd {
-				plReq := &PipelineRequest{
-					cmd:       subCmd,
-					readOnly:  CmdReadOnly(subCmd),
-					slot:      Key2Slot(cmd.Value(1)),
-					seq:       seq,
-					subSeq:    index,
-					backQ:     s.backQ,
-					parentCmd: mc,
-					wg:        s.reqWg,
-				}
+			exec := NewMultiCmdExec(s)
+			data, err := exec.Exec()
+			if err != nil {
+				s.handleErrorCmd([]byte(fmt.Sprintf("ERR EXEC error %v", err)))
+			} else {
 				s.reqWg.Add(1)
-				s.dispatcher.Schedule(plReq)
+				plRsp := &PipelineResponse{
+					rsp: resp.NewObjectFromData(data),
+					ctx: &PipelineRequest{seq: s.getNextReqSeq(), wg: s.reqWg},
+				}
+				s.backQ <- plRsp
 			}
 		}
 		s.multiCmd = nil
 	} else {
 		flag := CmdFlag(cmd)
 		if flag == CMD_FLAG_GENERAL || flag == CMD_FLAG_READ {
-			s.multiCmd = append(s.multiCmd, cmd)
+			*s.multiCmd = append(*s.multiCmd, cmd)
 			s.handleSimpleStringCmd([]byte("QUEUED"))
 		} else {
 			s.multiCmdErr = true
@@ -326,13 +323,13 @@ func (s *Session) handleReadAll(cmd *resp.Command) {
 			wg:        s.reqWg,
 		}
 		s.reqWg.Add(1)
-		s.dispatcher.Schedule(plReq)
+		s.Schedule(plReq)
 	}
 }
 
 func (s *Session) handleAuthCmd(cmd *resp.Command) {
 	if len(cmd.Args) == 2 {
-		if s.redisProxy.Auth(cmd.Args[1]) {
+		if s.redisConn.Auth(cmd.Args[1]) {
 			s.handleSimpleStringCmd(OK)
 			s.auth = true
 		} else {
@@ -368,7 +365,7 @@ func (s *Session) handleGeneralCmd(cmd *resp.Command) {
 	}
 
 	s.reqWg.Add(1)
-	s.dispatcher.Schedule(plReq)
+	s.Schedule(plReq)
 }
 
 func (s *Session) handleMultiKeyCmd(cmd *resp.Command, numKeys int) {
@@ -393,7 +390,39 @@ func (s *Session) handleMultiKeyCmd(cmd *resp.Command, numKeys int) {
 			wg:        s.reqWg,
 		}
 		s.reqWg.Add(1)
-		s.dispatcher.Schedule(plReq)
+		s.Schedule(plReq)
+	}
+}
+
+func (s *Session) Schedule(req *PipelineRequest) {
+	var server string
+	if req.readOnly {
+		server = s.dispatcher.slotTable.ReadServer(req.slot)
+	} else {
+		server = s.dispatcher.slotTable.WriteServer(req.slot)
+	}
+	backendServer, ok := s.backendServers[server]
+	if !ok {
+		glog.Info("create task runner", server)
+		backendServer = NewBackendServer(server, s.redisConn)
+		s.backendServers[server] = backendServer
+	}
+	resp, err := backendServer.Request(req)
+	if err == nil {
+		s.backQ <- resp
+	} else {
+		s.handleErrorCmd([]byte(fmt.Sprintf("ERR %v", err)))
+	}
+	glog.Infof("request count: %d, response count: %d", s.reqSeq, s.rspSeq)
+}
+
+func (s *Session) Reload(servers map[string]bool) {
+	for server, tr := range s.backendServers {
+		if _, ok := servers[server]; !ok {
+			glog.Infof("exit unused task runner %s", server)
+			tr.Close()
+			delete(s.backendServers, server)
+		}
 	}
 }
 
@@ -403,6 +432,10 @@ func (s *Session) Close() {
 		s.closed = true
 		s.Conn.Close()
 	}
+	for _, backendServer := range s.backendServers {
+		backendServer.Close()
+	}
+	s.dispatcher.RemoveEvent(s)
 }
 
 func (s *Session) Read(p []byte) (int, error) {
