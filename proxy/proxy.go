@@ -32,7 +32,7 @@ func (p *Proxy) Exit() {
 func (p *Proxy) handleConnection(cc net.Conn) {
 	session := &Session{
 		Conn:           cc,
-		r:              bufio.NewReader(cc),
+		r:              bufio.NewReaderSize(cc, 1024*512),
 		cached:         make(map[string]map[string]string),
 		backQ:          make(chan *PipelineResponse, 1000),
 		closeSignal:    &sync.WaitGroup{},

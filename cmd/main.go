@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -19,6 +20,7 @@ var config = struct {
 	StartupNodes           string
 	ConnectTimeout         time.Duration
 	SlotsReloadInterval    time.Duration
+	MaxProcs               int
 	BackendIdleConnections int
 	ReadPrefer             int
 }{}
@@ -29,6 +31,7 @@ func init() {
 	flag.StringVar(&config.StartupNodes, "startup-nodes", "127.0.0.1:7001", "startup nodes used to query cluster topology")
 	flag.DurationVar(&config.ConnectTimeout, "connect-timeout", 3*time.Second, "connect to backend timeout")
 	flag.DurationVar(&config.SlotsReloadInterval, "slots-reload-interval", 3*time.Second, "slots reload interval")
+	flag.IntVar(&config.MaxProcs, "max-procs", 1, "sets the maximum number of CPUs that can be executing")
 	flag.IntVar(&config.BackendIdleConnections, "backend-idle-connections", 5, "max number of idle connections for each backend server")
 	flag.IntVar(&config.ReadPrefer, "read-prefer", proxy.READ_PREFER_MASTER, "where read command to send to, eg. READ_PREFER_MASTER, READ_PREFER_SLAVE, READ_PREFER_SLAVE_IDC")
 }
@@ -39,6 +42,7 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	runtime.GOMAXPROCS(config.MaxProcs)
 	glog.Infof("pid %d", os.Getpid())
 
 	// shuffle startup nodes
