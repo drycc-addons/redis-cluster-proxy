@@ -3,6 +3,7 @@ package proxy
 import (
 	"net"
 	"slices"
+	"sync"
 	"time"
 
 	"bufio"
@@ -53,6 +54,7 @@ type Dispatcher struct {
 	slotInfoChan   chan []*SlotInfo
 	slotReloadChan chan struct{}
 	readPrefer     int
+	lock           sync.Mutex
 	sessions       []*Session
 }
 
@@ -89,6 +91,8 @@ func (d *Dispatcher) Run() {
 
 // remove unused task runner
 func (d *Dispatcher) handleSlotInfoChanged(slotInfos []*SlotInfo) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	newServers := make(map[string]bool)
 	for _, si := range slotInfos {
 		d.slotTable.SetSlotInfo(si)
@@ -103,11 +107,14 @@ func (d *Dispatcher) handleSlotInfoChanged(slotInfos []*SlotInfo) {
 }
 
 func (d *Dispatcher) AddEvent(session *Session) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	d.sessions = append(d.sessions, session)
-
 }
 
 func (d *Dispatcher) RemoveEvent(session *Session) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	d.sessions = slices.DeleteFunc(d.sessions, func(s *Session) bool {
 		return s == session
 	})
