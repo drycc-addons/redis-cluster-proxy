@@ -26,32 +26,31 @@ func NewRedisConn(maxIdle int, connTimeout time.Duration, password string, sendR
 }
 
 func (cp *RedisConn) Conn(server string) (net.Conn, error) {
-	return cp.postConnect(net.DialTimeout("tcp", server, cp.connTimeout))
+	conn, err := net.DialTimeout("tcp", server, cp.connTimeout)
+	if err != nil {
+		return nil, err
+	}
+	return cp.postConnect(conn)
 }
 
 func (cp *RedisConn) Auth(password string) bool {
 	return cp.password == password
 }
 
-func (cp *RedisConn) postConnect(conn net.Conn, err error) (net.Conn, error) {
+func (cp *RedisConn) postConnect(conn net.Conn) (net.Conn, error) {
 	if cp.password != "" {
 		cmd, _ := resp.NewCommand("AUTH", cp.password)
 		if _, err := cp.Request(cmd, conn); err != nil {
-			return conn, err
+			defer conn.Close()
+			return nil, err
 		}
 	}
 
-	if err != nil || !cp.sendReadOnly {
-		return conn, err
+	if _, err := cp.Request(REDIS_CMD_READ_ONLY, conn); err != nil {
+		defer conn.Close()
+		return nil, err
 	}
-	defer func() {
-		if err != nil {
-			conn.Close()
-			conn = nil
-		}
-	}()
-	_, err = cp.Request(REDIS_CMD_READ_ONLY, conn)
-	return conn, err
+	return conn, nil
 }
 
 func (cp *RedisConn) Request(command *resp.Command, conn net.Conn) (*resp.Data, error) {

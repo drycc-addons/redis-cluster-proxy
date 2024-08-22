@@ -202,8 +202,9 @@ func readDataForSpecType(r *bufio.Reader, line []byte) (*Data, error) {
 
 		ret.T = T_BulkString
 		if lenBulkString != -1 {
-			ret.String, _ = readRespN(r, lenBulkString)
-			_, err = readRespN(r, 2)
+			ret.String = make([]byte, lenBulkString)
+			readRespN(r, &ret.String)
+			err = skipRespN(r, 2)
 		} else {
 			ret.IsNil = true
 		}
@@ -242,7 +243,8 @@ func readDataBytesForSpecType(r *bufio.Reader, line []byte, obj *Object) error {
 			return err
 		}
 		if lenBulkString != -1 {
-			buf, err := readRespN(r, lenBulkString+2)
+			buf := make([]byte, lenBulkString+2)
+			err := readRespN(r, &buf)
 			if err != nil {
 				return err
 			} else {
@@ -312,12 +314,20 @@ func readRespCommandLine(r *bufio.Reader) ([]byte, error) {
 }
 
 // read the next N bytes
-func readRespN(r *bufio.Reader, n int64) ([]byte, error) {
-	buf := make([]byte, n)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return nil, err
+func readRespN(r *bufio.Reader, data *[]byte) error {
+	if _, err := io.ReadFull(r, *data); err != nil {
+		return err
 	} else {
-		return buf, nil
+		return nil
+	}
+}
+
+func skipRespN(r *bufio.Reader, size int) error {
+	data := make([]byte, size)
+	if _, err := io.ReadFull(r, data); err != nil {
+		return err
+	} else {
+		return nil
 	}
 }
 
@@ -327,6 +337,7 @@ type Object struct {
 
 func NewObject() *Object {
 	o := &Object{}
+	o.raw.Grow(1024 * 256)
 	return o
 }
 
