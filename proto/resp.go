@@ -199,12 +199,11 @@ func readDataForSpecType(r *bufio.Reader, line []byte) (*Data, error) {
 	case T_BulkString:
 		var lenBulkString int64
 		lenBulkString, err = strconv.ParseInt(string(line[1:]), 10, 64)
-
 		ret.T = T_BulkString
 		if lenBulkString != -1 {
-			ret.String = make([]byte, lenBulkString)
-			readRespN(r, &ret.String)
-			err = skipRespN(r, 2)
+			data := make([]byte, lenBulkString+2)
+			readRespN(r, &data)
+			ret.String = data[:lenBulkString]
 		} else {
 			ret.IsNil = true
 		}
@@ -316,15 +315,6 @@ func readRespCommandLine(r *bufio.Reader) ([]byte, error) {
 // read the next N bytes
 func readRespN(r *bufio.Reader, data *[]byte) error {
 	if _, err := io.ReadFull(r, *data); err != nil {
-		return err
-	} else {
-		return nil
-	}
-}
-
-func skipRespN(r *bufio.Reader, size int) error {
-	data := make([]byte, size)
-	if _, err := io.ReadFull(r, data); err != nil {
 		return err
 	} else {
 		return nil

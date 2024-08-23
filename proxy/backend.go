@@ -118,8 +118,8 @@ func (tr *BackendServer) initRWConn(conn net.Conn) {
 		tr.conn.Close()
 	}
 	tr.conn = conn
-	tr.r = bufio.NewReader(tr.conn)
-	tr.w = bufio.NewWriter(tr.conn)
+	tr.r = bufio.NewReaderSize(tr.conn, 1024*512)
+	tr.w = bufio.NewWriterSize(tr.conn, 1024*512)
 }
 
 func (tr *BackendServer) Close() {
