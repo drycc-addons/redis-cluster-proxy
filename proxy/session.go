@@ -28,28 +28,32 @@ var (
 
 type Session struct {
 	net.Conn
-	r              *bufio.Reader
-	auth           bool
-	reqSeq         int64
-	rspSeq         int64
-	backQ          chan *PipelineResponse
-	closed         bool
-	cached         map[string]map[string]string
-	closeSignal    *sync.WaitGroup
-	reqWg          *sync.WaitGroup
-	rspHeap        *PipelineResponseHeap
-	redisConn      *RedisConn
-	dispatcher     *Dispatcher
-	multiCmd       *[]*resp.Command
-	multiCmdErr    bool
-	backendServers map[string]*BackendServer
+	r           *bufio.Reader
+	auth        bool
+	reqSeq      int64
+	rspSeq      int64
+	backQ       chan *PipelineResponse
+	closed      bool
+	cached      map[string]map[string]string
+	closeSignal *sync.WaitGroup
+	reqWg       *sync.WaitGroup
+	rspHeap     *PipelineResponseHeap
+	redisConn   *RedisConn
+	dispatcher  *Dispatcher
+	multiCmd    *[]*resp.Command
+	multiCmdErr bool
 }
 
 func (s *Session) Run() {
 	s.closeSignal.Add(1)
-	s.dispatcher.AddEvent(s)
 	go s.WritingLoop()
 	s.ReadingLoop()
+}
+
+func (s *Session) Reset(conn net.Conn) {
+	s.Conn = conn
+	s.closed = false
+	s.r = bufio.NewReaderSize(conn, 1024*512)
 }
 
 // WritingLoop consumes backQ and send response to client
@@ -57,6 +61,9 @@ func (s *Session) Run() {
 // and continue loop until the reader has exited
 func (s *Session) WritingLoop() {
 	for rsp := range s.backQ {
+		if rsp == nil {
+			break
+		}
 		if err := s.handleRespPipeline(rsp); err != nil {
 			s.Close()
 			continue
@@ -90,7 +97,7 @@ func (s *Session) ReadingLoop() {
 	// wait for all request done
 	s.reqWg.Wait()
 	// notify writer
-	close(s.backQ)
+	s.backQ <- nil
 	s.closeSignal.Wait()
 }
 
@@ -401,29 +408,20 @@ func (s *Session) Schedule(req *PipelineRequest) {
 	} else {
 		server = s.dispatcher.slotTable.WriteServer(req.slot)
 	}
-	backendServer, ok := s.backendServers[server]
-	if !ok {
-		glog.Info("create task runner", server)
-		backendServer = NewBackendServer(server, s.redisConn)
-		s.backendServers[server] = backendServer
-	}
-	resp, err := backendServer.Request(req)
-	if err == nil {
-		s.backQ <- resp
-	} else {
-		s.handleErrorCmd([]byte(fmt.Sprintf("ERR %v", err)))
-	}
-	glog.Infof("request count: %d, response count: %d", s.reqSeq, s.rspSeq)
-}
 
-func (s *Session) Reload(servers map[string]bool) {
-	for server, tr := range s.backendServers {
-		if _, ok := servers[server]; !ok {
-			glog.Infof("exit unused task runner %s", server)
-			tr.Close()
-			delete(s.backendServers, server)
+	backendServer, err := s.dispatcher.backendServerPool.Get(server)
+	if err != nil {
+		s.handleErrorCmd([]byte(fmt.Sprintf("ERR %v", err)))
+	} else {
+		defer s.dispatcher.backendServerPool.Put(backendServer)
+		resp, err := backendServer.Request(req)
+		if err == nil {
+			s.backQ <- resp
+		} else {
+			s.handleErrorCmd([]byte(fmt.Sprintf("ERR %v", err)))
 		}
 	}
+	glog.Infof("request count: %d, response count: %d", s.reqSeq, s.rspSeq)
 }
 
 func (s *Session) Close() {
@@ -432,10 +430,6 @@ func (s *Session) Close() {
 		s.closed = true
 		s.Conn.Close()
 	}
-	for _, backendServer := range s.backendServers {
-		backendServer.Close()
-	}
-	s.dispatcher.RemoveEvent(s)
 }
 
 func (s *Session) Read(p []byte) (int, error) {

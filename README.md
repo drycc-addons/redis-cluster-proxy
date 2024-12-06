@@ -121,3 +121,41 @@ The Drycc project welcomes contributions from all developers. The high-level pro
 
 [prs]: https://github.com/drycc-addons/redis-cluster-proxy/pulls
 [issues]: https://github.com/drycc-addons/redis-cluster-proxy/issues
+
+
+#
+# hb-redis-cluster-standard-128-3z
+
+/tmp/valkey-benchmark -h 10.0.4.76 -p 36379 -a JDYptivHVa -c 1000 -n 50000 get mytestkey
+
+Summary:
+  throughput summary: 26511.13 requests per second
+  latency summary (msec):
+          avg       min       p50       p95       p99       max
+       35.680     6.824    32.399    60.223    75.903   112.575
+
+/tmp/valkey-benchmark -h 10.0.6.139 -p 6379 -a JDYptivHVa -c 1000 -n 50000 get mytestkey
+
+Summary:
+  throughput summary: 68027.21 requests per second
+  latency summary (msec):
+          avg       min       p50       p95       p99       max
+        8.019     1.616     7.903     9.719    12.119    14.079
+=======================================================
+# hb-redis-cluster-standard-128
+
+/tmp/valkey-benchmark -h 10.0.1.124 -p 36379 -a qpIraxXi4z -c 1000 -n 50000 get mytestkey
+
+Summary:
+  throughput summary: 29463.76 requests per second
+  latency summary (msec):
+          avg       min       p50       p95       p99       max
+       32.065     0.240    30.047    52.479    67.775    82.815
+
+/tmp/valkey-benchmark -h 10.0.0.111 -p 6379 -a qpIraxXi4z -c 1000 -n 50000 get mytestkey
+
+Summary:
+  throughput summary: 116009.28 requests per second
+  latency summary (msec):
+          avg       min       p50       p95       p99       max
+        4.319     0.456     4.255     5.727     7.671    11.871

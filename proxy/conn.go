@@ -11,13 +11,17 @@ import (
 )
 
 type RedisConn struct {
+	initCap      int
+	maxIdle      int
 	connTimeout  time.Duration
 	password     string
 	sendReadOnly bool
 }
 
-func NewRedisConn(maxIdle int, connTimeout time.Duration, password string, sendReadOnly bool) *RedisConn {
+func NewRedisConn(initCap, maxIdle int, connTimeout time.Duration, password string, sendReadOnly bool) *RedisConn {
 	p := &RedisConn{
+		initCap:      initCap,
+		maxIdle:      maxIdle,
 		password:     password,
 		connTimeout:  connTimeout,
 		sendReadOnly: sendReadOnly,

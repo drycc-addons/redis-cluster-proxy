@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"net"
-	"slices"
 	"sync"
 	"time"
 
@@ -51,11 +50,11 @@ type Dispatcher struct {
 	slotReloadInterval time.Duration
 	redisConn          *RedisConn
 	// notify slots changed
-	slotInfoChan   chan []*SlotInfo
-	slotReloadChan chan struct{}
-	readPrefer     int
-	lock           sync.Mutex
-	sessions       []*Session
+	slotInfoChan      chan []*SlotInfo
+	slotReloadChan    chan struct{}
+	readPrefer        int
+	lock              sync.Mutex
+	backendServerPool *BackendServerPool
 }
 
 func NewDispatcher(startupNodes []string, slotReloadInterval time.Duration, redisConn *RedisConn, readPrefer int) *Dispatcher {
@@ -67,6 +66,7 @@ func NewDispatcher(startupNodes []string, slotReloadInterval time.Duration, redi
 		slotInfoChan:       make(chan []*SlotInfo),
 		slotReloadChan:     make(chan struct{}, 1),
 		readPrefer:         readPrefer,
+		backendServerPool:  NewBackendServerPool(redisConn),
 	}
 	return d
 }
@@ -101,23 +101,7 @@ func (d *Dispatcher) handleSlotInfoChanged(slotInfos []*SlotInfo) {
 			newServers[read] = true
 		}
 	}
-	for _, s := range d.sessions {
-		s.Reload(newServers)
-	}
-}
-
-func (d *Dispatcher) AddEvent(session *Session) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	d.sessions = append(d.sessions, session)
-}
-
-func (d *Dispatcher) RemoveEvent(session *Session) {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	d.sessions = slices.DeleteFunc(d.sessions, func(s *Session) bool {
-		return s == session
-	})
+	d.backendServerPool.Reload(newServers)
 }
 
 // wait for the slot reload chan and reload cluster topology

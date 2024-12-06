@@ -21,6 +21,7 @@ var config = struct {
 	ConnectTimeout         time.Duration
 	SlotsReloadInterval    time.Duration
 	MaxProcs               int
+	BackendInitConnections int
 	BackendIdleConnections int
 	ReadPrefer             int
 }{}
@@ -32,6 +33,7 @@ func init() {
 	flag.DurationVar(&config.ConnectTimeout, "connect-timeout", 10*time.Second, "connect to backend timeout")
 	flag.DurationVar(&config.SlotsReloadInterval, "slots-reload-interval", 3*time.Second, "slots reload interval")
 	flag.IntVar(&config.MaxProcs, "max-procs", 1, "sets the maximum number of CPUs that can be executing")
+	flag.IntVar(&config.BackendInitConnections, "backend-init-connections", 5, "max number of init connections for each backend server")
 	flag.IntVar(&config.BackendIdleConnections, "backend-idle-connections", 5, "max number of idle connections for each backend server")
 	flag.IntVar(&config.ReadPrefer, "read-prefer", proxy.READ_PREFER_MASTER, "where read command to send to, eg. READ_PREFER_MASTER, READ_PREFER_SLAVE, READ_PREFER_SLAVE_IDC")
 }
@@ -45,6 +47,10 @@ func main() {
 	runtime.GOMAXPROCS(config.MaxProcs)
 	glog.Infof("pid %d", os.Getpid())
 
+	if config.BackendInitConnections < 0 || config.BackendIdleConnections < 0 || config.BackendInitConnections > config.BackendIdleConnections {
+		glog.Exit("invalid backend connections settings")
+	}
+
 	// shuffle startup nodes
 	startupNodes := strings.Split(config.StartupNodes, ",")
 	indexes := rand.Perm(len(startupNodes))
@@ -52,7 +58,13 @@ func main() {
 		startupNodes[i] = startupNodes[indexes[i]]
 		startupNodes[indexes[i]] = startupNode
 	}
-	conn := proxy.NewRedisConn(config.BackendIdleConnections, config.ConnectTimeout, config.Password, config.ReadPrefer != proxy.READ_PREFER_MASTER)
+	conn := proxy.NewRedisConn(
+		config.BackendInitConnections,
+		config.BackendIdleConnections,
+		config.ConnectTimeout,
+		config.Password,
+		config.ReadPrefer != proxy.READ_PREFER_MASTER,
+	)
 
 	dispatcher := proxy.NewDispatcher(startupNodes, config.SlotsReloadInterval, conn, config.ReadPrefer)
 	if err := dispatcher.InitSlotTable(); err != nil {

@@ -122,8 +122,9 @@ func (tr *BackendServer) initRWConn(conn net.Conn) {
 	tr.w = bufio.NewWriterSize(tr.conn, 1024*512)
 }
 
-func (tr *BackendServer) Close() {
+func (tr *BackendServer) Close() error {
 	if tr.conn != nil {
-		tr.conn.Close()
+		return tr.conn.Close()
 	}
+	return nil
 }
