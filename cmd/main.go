@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/drycc-addons/redis-cluster-proxy/proxy"
+	"github.com/drycc-addons/valkey-cluster-proxy/proxy"
 	"github.com/golang/glog"
 )
 
@@ -58,7 +58,7 @@ func main() {
 		startupNodes[i] = startupNodes[indexes[i]]
 		startupNodes[indexes[i]] = startupNode
 	}
-	conn := proxy.NewRedisConn(
+	conn := proxy.NewValkeyConn(
 		config.BackendInitConnections,
 		config.BackendIdleConnections,
 		config.ConnectTimeout,

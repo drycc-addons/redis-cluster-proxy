@@ -8,27 +8,27 @@ import (
 	"net"
 	"time"
 
-	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
+	resp "github.com/drycc-addons/valkey-cluster-proxy/proto"
 	"github.com/golang/glog"
 )
 
 type BackendServer struct {
-	inflight  *list.List
-	server    string
-	conn      net.Conn
-	r         *bufio.Reader
-	w         *bufio.Writer
-	redisConn *RedisConn
+	inflight   *list.List
+	server     string
+	conn       net.Conn
+	r          *bufio.Reader
+	w          *bufio.Writer
+	valkeyConn *ValkeyConn
 }
 
-func NewBackendServer(server string, redisConn *RedisConn) *BackendServer {
+func NewBackendServer(server string, valkeyConn *ValkeyConn) *BackendServer {
 	tr := &BackendServer{
-		inflight:  list.New(),
-		server:    server,
-		redisConn: redisConn,
+		inflight:   list.New(),
+		server:     server,
+		valkeyConn: valkeyConn,
 	}
 
-	if conn, err := redisConn.Conn(server); err != nil {
+	if conn, err := valkeyConn.Conn(server); err != nil {
 		glog.Error(tr.server, err)
 	} else {
 		tr.initRWConn(conn)
@@ -84,7 +84,7 @@ func (tr *BackendServer) tryRecover(err error) error {
 	tr.cleanupInflight(err)
 
 	//try to recover
-	if conn, err := tr.redisConn.Conn(tr.server); err != nil {
+	if conn, err := tr.valkeyConn.Conn(tr.server); err != nil {
 		glog.Error("try to recover from error failed", tr.server, err)
 		time.Sleep(100 * time.Millisecond)
 		return err

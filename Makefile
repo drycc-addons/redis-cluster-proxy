@@ -2,7 +2,7 @@ all: build
 
 build:
 	@mkdir -p bin
-	go build -o bin/redis-cluster-proxy ./cmd
+	go build -o bin/valkey-cluster-proxy ./cmd
 
 clean:
 	@rm -rf bin

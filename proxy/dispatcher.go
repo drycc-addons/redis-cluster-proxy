@@ -10,7 +10,7 @@ import (
 	"math/rand"
 	"strings"
 
-	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
+	resp "github.com/drycc-addons/valkey-cluster-proxy/proto"
 	"github.com/golang/glog"
 )
 
@@ -33,22 +33,22 @@ const (
 )
 
 var (
-	REDIS_CMD_CLUSTER_SLOTS *resp.Command
-	REDIS_CMD_CLUSTER_NODES *resp.Command
-	REDIS_CMD_READ_ONLY     *resp.Command
+	VALKEY_CMD_CLUSTER_SLOTS *resp.Command
+	VALKEY_CMD_CLUSTER_NODES *resp.Command
+	VALKEY_CMD_READ_ONLY     *resp.Command
 )
 
 func init() {
-	REDIS_CMD_READ_ONLY, _ = resp.NewCommand("READONLY")
-	REDIS_CMD_CLUSTER_NODES, _ = resp.NewCommand("CLUSTER", "NODES")
-	REDIS_CMD_CLUSTER_SLOTS, _ = resp.NewCommand("CLUSTER", "SLOTS")
+	VALKEY_CMD_READ_ONLY, _ = resp.NewCommand("READONLY")
+	VALKEY_CMD_CLUSTER_NODES, _ = resp.NewCommand("CLUSTER", "NODES")
+	VALKEY_CMD_CLUSTER_SLOTS, _ = resp.NewCommand("CLUSTER", "SLOTS")
 }
 
 type Dispatcher struct {
 	startupNodes       []string
 	slotTable          *SlotTable
 	slotReloadInterval time.Duration
-	redisConn          *RedisConn
+	valkeyConn         *ValkeyConn
 	// notify slots changed
 	slotInfoChan      chan []*SlotInfo
 	slotReloadChan    chan struct{}
@@ -57,16 +57,16 @@ type Dispatcher struct {
 	backendServerPool *BackendServerPool
 }
 
-func NewDispatcher(startupNodes []string, slotReloadInterval time.Duration, redisConn *RedisConn, readPrefer int) *Dispatcher {
+func NewDispatcher(startupNodes []string, slotReloadInterval time.Duration, valkeyConn *ValkeyConn, readPrefer int) *Dispatcher {
 	d := &Dispatcher{
 		startupNodes:       startupNodes,
 		slotTable:          NewSlotTable(),
 		slotReloadInterval: slotReloadInterval,
-		redisConn:          redisConn,
+		valkeyConn:         valkeyConn,
 		slotInfoChan:       make(chan []*SlotInfo),
 		slotReloadChan:     make(chan struct{}, 1),
 		readPrefer:         readPrefer,
-		backendServerPool:  NewBackendServerPool(redisConn),
+		backendServerPool:  NewBackendServerPool(valkeyConn),
 	}
 	return d
 }
@@ -152,7 +152,7 @@ func (d *Dispatcher) reloadTopology() (slotInfos []*SlotInfo, err error) {
 */
 func (d *Dispatcher) doReload(server string) (slotInfos []*SlotInfo, err error) {
 	var conn net.Conn
-	conn, err = d.redisConn.Conn(server)
+	conn, err = d.valkeyConn.Conn(server)
 	if err != nil {
 		glog.Error(server, err)
 		return
@@ -160,7 +160,7 @@ func (d *Dispatcher) doReload(server string) (slotInfos []*SlotInfo, err error) 
 		glog.Infof("query cluster slots from %s", server)
 	}
 	defer conn.Close()
-	_, err = conn.Write(REDIS_CMD_CLUSTER_SLOTS.Format())
+	_, err = conn.Write(VALKEY_CMD_CLUSTER_SLOTS.Format())
 	if err != nil {
 		glog.Errorf("write cluster slots error, server=%s, err=%v", server, err)
 		return
@@ -178,7 +178,7 @@ func (d *Dispatcher) doReload(server string) (slotInfos []*SlotInfo, err error) 
 	}
 
 	// filter slot info with cluster nodes information
-	_, err = conn.Write(REDIS_CMD_CLUSTER_NODES.Format())
+	_, err = conn.Write(VALKEY_CMD_CLUSTER_NODES.Format())
 	if err != nil {
 		glog.Errorf("write cluster nodes error, server=%s, err=%v", server, err)
 		return

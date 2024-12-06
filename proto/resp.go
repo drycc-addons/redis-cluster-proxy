@@ -1,4 +1,4 @@
-// a simple and high-performance library for parsing and encoding redis protocal and redis inline command
+// a simple and high-performance library for parsing and encoding valkey protocal and valkey inline command
 package proto
 
 import (
@@ -26,7 +26,7 @@ var (
 /*
 Command
 
-redis supports two kinds of Command: (Inline Command) and (Array With BulkString)
+valkey supports two kinds of Command: (Inline Command) and (Array With BulkString)
 */
 type Command struct {
 	Args []string //Args[0] is the command name
@@ -299,7 +299,7 @@ func readRespLineBytes(r *bufio.Reader, obj *Object) ([]byte, error) {
 	}
 }
 
-// read a redis InlineCommand
+// read a valkey InlineCommand
 func readRespCommandLine(r *bufio.Reader) ([]byte, error) {
 	line, err := r.ReadBytes('\n')
 	if err != nil {

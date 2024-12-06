@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
+	resp "github.com/drycc-addons/valkey-cluster-proxy/proto"
 	"github.com/golang/glog"
 )
 
@@ -33,7 +33,7 @@ func NewMultiCmdExec(session *Session) *MultiCmdExec {
 func (m *MultiCmdExec) execServer(server string) (*resp.Data, error) {
 	var err error
 	var data *resp.Data
-	conn, err := m.session.redisConn.Conn(server)
+	conn, err := m.session.valkeyConn.Conn(server)
 	defer func() {
 		if err != nil {
 			glog.Error(err)
@@ -42,13 +42,13 @@ func (m *MultiCmdExec) execServer(server string) (*resp.Data, error) {
 	}()
 	if err == nil {
 		cmd, _ := resp.NewCommand("MULTI")
-		_, err = m.session.redisConn.Request(cmd, conn)
+		_, err = m.session.valkeyConn.Request(cmd, conn)
 		if err == nil {
 			for _, cmd := range m.serverCmds[server] {
-				m.session.redisConn.Request(cmd, conn)
+				m.session.valkeyConn.Request(cmd, conn)
 			}
 			cmd, _ := resp.NewCommand("EXEC")
-			data, err = m.session.redisConn.Request(cmd, conn)
+			data, err = m.session.valkeyConn.Request(cmd, conn)
 		}
 	}
 	if err != nil || data == nil {

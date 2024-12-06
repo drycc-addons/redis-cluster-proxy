@@ -36,7 +36,7 @@ var table = [256]uint16{
 }
 
 // CRC16 returns checksum for a given set of bytes based on the crc algorithm
-// defined for hashing redis keys in a cluster setup
+// defined for hashing valkey keys in a cluster setup
 func CRC16(buf []byte) uint16 {
 	crc := uint16(0)
 	for _, b := range buf {

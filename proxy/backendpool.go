@@ -4,25 +4,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/drycc-addons/redis-cluster-proxy/proxy/connpool"
+	"github.com/drycc-addons/valkey-cluster-proxy/proxy/connpool"
 )
 
 type BackendServerPool struct {
 	lock           sync.Mutex
-	redisConn      *RedisConn
+	valkeyConn     *ValkeyConn
 	backendServers sync.Map
 }
 
-func NewBackendServerPool(redisConn *RedisConn) *BackendServerPool {
-	return &BackendServerPool{redisConn: redisConn}
+func NewBackendServerPool(valkeyConn *ValkeyConn) *BackendServerPool {
+	return &BackendServerPool{valkeyConn: valkeyConn}
 }
 
 func (b *BackendServerPool) Init(server string) (*connpool.Pool, error) {
 	pool, err := connpool.NewChannelPool(&connpool.Config{
-		InitCap: b.redisConn.initCap,
-		MaxIdle: b.redisConn.maxIdle,
+		InitCap: b.valkeyConn.initCap,
+		MaxIdle: b.valkeyConn.maxIdle,
 		Factory: func() (interface{}, error) {
-			return NewBackendServer(server, b.redisConn), nil
+			return NewBackendServer(server, b.valkeyConn), nil
 		},
 		Close:       func(v interface{}) error { return v.(*BackendServer).Close() },
 		IdleTimeout: 60 * time.Second,

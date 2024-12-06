@@ -6,11 +6,11 @@ import (
 	"net"
 	"time"
 
-	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
+	resp "github.com/drycc-addons/valkey-cluster-proxy/proto"
 	"github.com/golang/glog"
 )
 
-type RedisConn struct {
+type ValkeyConn struct {
 	initCap      int
 	maxIdle      int
 	connTimeout  time.Duration
@@ -18,8 +18,8 @@ type RedisConn struct {
 	sendReadOnly bool
 }
 
-func NewRedisConn(initCap, maxIdle int, connTimeout time.Duration, password string, sendReadOnly bool) *RedisConn {
-	p := &RedisConn{
+func NewValkeyConn(initCap, maxIdle int, connTimeout time.Duration, password string, sendReadOnly bool) *ValkeyConn {
+	p := &ValkeyConn{
 		initCap:      initCap,
 		maxIdle:      maxIdle,
 		password:     password,
@@ -29,7 +29,7 @@ func NewRedisConn(initCap, maxIdle int, connTimeout time.Duration, password stri
 	return p
 }
 
-func (cp *RedisConn) Conn(server string) (net.Conn, error) {
+func (cp *ValkeyConn) Conn(server string) (net.Conn, error) {
 	conn, err := net.DialTimeout("tcp", server, cp.connTimeout)
 	if err != nil {
 		return nil, err
@@ -37,11 +37,11 @@ func (cp *RedisConn) Conn(server string) (net.Conn, error) {
 	return cp.postConnect(conn)
 }
 
-func (cp *RedisConn) Auth(password string) bool {
+func (cp *ValkeyConn) Auth(password string) bool {
 	return cp.password == password
 }
 
-func (cp *RedisConn) postConnect(conn net.Conn) (net.Conn, error) {
+func (cp *ValkeyConn) postConnect(conn net.Conn) (net.Conn, error) {
 	if cp.password != "" {
 		cmd, _ := resp.NewCommand("AUTH", cp.password)
 		if _, err := cp.Request(cmd, conn); err != nil {
@@ -50,14 +50,14 @@ func (cp *RedisConn) postConnect(conn net.Conn) (net.Conn, error) {
 		}
 	}
 
-	if _, err := cp.Request(REDIS_CMD_READ_ONLY, conn); err != nil {
+	if _, err := cp.Request(VALKEY_CMD_READ_ONLY, conn); err != nil {
 		defer conn.Close()
 		return nil, err
 	}
 	return conn, nil
 }
 
-func (cp *RedisConn) Request(command *resp.Command, conn net.Conn) (*resp.Data, error) {
+func (cp *ValkeyConn) Request(command *resp.Command, conn net.Conn) (*resp.Data, error) {
 	if _, err := conn.Write(command.Format()); err != nil {
 		glog.Errorf("write %s failed, addr: %s, error: %s", command.Name(), conn.RemoteAddr().String(), err)
 		return nil, err

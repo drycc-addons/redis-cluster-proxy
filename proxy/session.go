@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
+	resp "github.com/drycc-addons/valkey-cluster-proxy/proto"
 	"github.com/golang/glog"
 )
 
@@ -38,7 +38,7 @@ type Session struct {
 	closeSignal *sync.WaitGroup
 	reqWg       *sync.WaitGroup
 	rspHeap     *PipelineResponseHeap
-	redisConn   *RedisConn
+	valkeyConn  *ValkeyConn
 	dispatcher  *Dispatcher
 	multiCmd    *[]*resp.Command
 	multiCmdErr bool
@@ -74,7 +74,7 @@ func (s *Session) WritingLoop() {
 }
 
 func (s *Session) checkAuth() bool {
-	return s.auth || s.redisConn.Auth("")
+	return s.auth || s.valkeyConn.Auth("")
 }
 
 func (s *Session) ReadingLoop() {
@@ -146,13 +146,13 @@ func (s *Session) writeResp(plRsp *PipelineResponse) error {
 	return nil
 }
 
-// redirect send request to backend again to new server told by redis cluster
+// redirect send request to backend again to new server told by valkey cluster
 func (s *Session) redirect(server string, plRsp *PipelineResponse, ask bool) {
 	var conn net.Conn
 	var err error
 
 	plRsp.err = nil
-	conn, err = s.redisConn.Conn(server)
+	conn, err = s.valkeyConn.Conn(server)
 	if err != nil {
 		glog.Error(err)
 		plRsp.err = err
@@ -336,7 +336,7 @@ func (s *Session) handleReadAll(cmd *resp.Command) {
 
 func (s *Session) handleAuthCmd(cmd *resp.Command) {
 	if len(cmd.Args) == 2 {
-		if s.redisConn.Auth(cmd.Args[1]) {
+		if s.valkeyConn.Auth(cmd.Args[1]) {
 			s.handleSimpleStringCmd(OK)
 			s.auth = true
 		} else {

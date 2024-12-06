@@ -1,6 +1,6 @@
-# Redis Proxy
+# Valkey Proxy
 
-Redis Proxy is a lightweight, fast but powerful Redis Cluster Proxy written in Go.
+Valkey Proxy is a lightweight, fast but powerful Valkey Cluster Proxy written in Go.
 
 ## Usage
 
@@ -13,8 +13,8 @@ make build
 ### Command
 
 ```bash
-# ./bin/redis-cluster-proxy --help
-Usage of bin/redis-cluster-proxy:
+# ./bin/valkey-cluster-proxy --help
+Usage of bin/valkey-cluster-proxy:
   -addr string
         proxy serving addr (default "0.0.0.0:8088")
   -alsologtostderr
@@ -58,17 +58,17 @@ Upon cluster topology changed, backend server will response MOVED or ASK error. 
 
 ## Performance
 
-Redis includes the redis-benchmark utility that simulates running commands done by N clients at the same time sending M total queries (it is similar to the Apache's ab utility). Below you'll find the full output of a benchmark executed against a Linux box.
+Valkey includes the valkey-benchmark utility that simulates running commands done by N clients at the same time sending M total queries (it is similar to the Apache's ab utility). Below you'll find the full output of a benchmark executed against a Linux box.
 
 The following options are supported:
 
 ```bash
-Usage: redis-benchmark [-h <host>] [-p <port>] [-c <clients>] [-n <requests]> [-k <boolean>]
+Usage: valkey-benchmark [-h <host>] [-p <port>] [-c <clients>] [-n <requests]> [-k <boolean>]
 
  -h <hostname>      Server hostname (default 127.0.0.1)
  -p <port>          Server port (default 6379)
  -s <socket>        Server socket (overrides host and port)
- -a <password>      Password for Redis Auth
+ -a <password>      Password for Valkey Auth
  --user <username>  Used to send ACL style 'AUTH username pass'. Needs -a.
  -c <clients>       Number of parallel connections (default 50)
  -n <requests>      Total number of requests (default 100000)
@@ -100,10 +100,10 @@ Usage: redis-benchmark [-h <host>] [-p <port>] [-c <clients>] [-n <requests]> [-
  --version          Output version and exit.
 ```
 
-You need to have a running Redis instance before launching the benchmark. A typical example would be:
+You need to have a running Valkey instance before launching the benchmark. A typical example would be:
 
 ```bash
-redis-benchmark -p 8088 -c 500 -n 5000000 -P 100 -r 10000 -t get,set
+valkey-benchmark -p 8088 -c 500 -n 5000000 -P 100 -r 10000 -t get,set
 ```
 
 Using this tool is quite easy, and you can also write your own benchmark, but as with any benchmarking activity, there are some pitfalls to avoid.
@@ -119,43 +119,5 @@ The Drycc project welcomes contributions from all developers. The high-level pro
 * Drycc project maintainers will review your code.
 * After two maintainers approve it, they will merge your PR.
 
-[prs]: https://github.com/drycc-addons/redis-cluster-proxy/pulls
-[issues]: https://github.com/drycc-addons/redis-cluster-proxy/issues
-
-
-#
-# hb-redis-cluster-standard-128-3z
-
-/tmp/valkey-benchmark -h 10.0.4.76 -p 36379 -a JDYptivHVa -c 1000 -n 50000 get mytestkey
-
-Summary:
-  throughput summary: 26511.13 requests per second
-  latency summary (msec):
-          avg       min       p50       p95       p99       max
-       35.680     6.824    32.399    60.223    75.903   112.575
-
-/tmp/valkey-benchmark -h 10.0.6.139 -p 6379 -a JDYptivHVa -c 1000 -n 50000 get mytestkey
-
-Summary:
-  throughput summary: 68027.21 requests per second
-  latency summary (msec):
-          avg       min       p50       p95       p99       max
-        8.019     1.616     7.903     9.719    12.119    14.079
-=======================================================
-# hb-redis-cluster-standard-128
-
-/tmp/valkey-benchmark -h 10.0.1.124 -p 36379 -a qpIraxXi4z -c 1000 -n 50000 get mytestkey
-
-Summary:
-  throughput summary: 29463.76 requests per second
-  latency summary (msec):
-          avg       min       p50       p95       p99       max
-       32.065     0.240    30.047    52.479    67.775    82.815
-
-/tmp/valkey-benchmark -h 10.0.0.111 -p 6379 -a qpIraxXi4z -c 1000 -n 50000 get mytestkey
-
-Summary:
-  throughput summary: 116009.28 requests per second
-  latency summary (msec):
-          avg       min       p50       p95       p99       max
-        4.319     0.456     4.255     5.727     7.671    11.871
+[prs]: https://github.com/drycc-addons/valkey-cluster-proxy/pulls
+[issues]: https://github.com/drycc-addons/valkey-cluster-proxy/issues

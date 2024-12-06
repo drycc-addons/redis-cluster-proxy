@@ -1,4 +1,4 @@
-module github.com/drycc-addons/redis-cluster-proxy
+module github.com/drycc-addons/valkey-cluster-proxy
 
 go 1.22
 

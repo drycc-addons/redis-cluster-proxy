@@ -11,11 +11,11 @@ type Proxy struct {
 	addr       string
 	pool       *sync.Pool
 	dispatcher *Dispatcher
-	redisConn  *RedisConn
+	valkeyConn *ValkeyConn
 	exitChan   chan struct{}
 }
 
-func NewProxy(addr string, dispatcher *Dispatcher, redisConn *RedisConn) *Proxy {
+func NewProxy(addr string, dispatcher *Dispatcher, valkeyConn *ValkeyConn) *Proxy {
 	p := &Proxy{
 		addr: addr,
 		pool: &sync.Pool{
@@ -25,14 +25,14 @@ func NewProxy(addr string, dispatcher *Dispatcher, redisConn *RedisConn) *Proxy 
 					backQ:       make(chan *PipelineResponse, 1000),
 					closeSignal: &sync.WaitGroup{},
 					reqWg:       &sync.WaitGroup{},
-					redisConn:   redisConn,
+					valkeyConn:  valkeyConn,
 					dispatcher:  dispatcher,
 					rspHeap:     &PipelineResponseHeap{},
 				}
 			},
 		},
 		dispatcher: dispatcher,
-		redisConn:  redisConn,
+		valkeyConn: valkeyConn,
 		exitChan:   make(chan struct{}),
 	}
 	return p
@@ -45,9 +45,9 @@ func (p *Proxy) Exit() {
 func (p *Proxy) handleConnection(cc net.Conn) {
 	session := p.pool.Get().(*Session)
 	defer session.Close()
+	defer p.pool.Put(session)
 	session.Reset(cc)
 	session.Run()
-	p.pool.Put(session)
 }
 
 func (p *Proxy) Run() {

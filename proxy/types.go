@@ -1,7 +1,7 @@
 package proxy
 
 import (
-	resp "github.com/drycc-addons/redis-cluster-proxy/proto"
+	resp "github.com/drycc-addons/valkey-cluster-proxy/proto"
 )
 
 const (
