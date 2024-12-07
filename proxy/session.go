@@ -50,20 +50,11 @@ func (s *Session) Run() {
 	s.ReadingLoop()
 }
 
-func (s *Session) Reset(conn net.Conn) {
-	s.Conn = conn
-	s.closed = false
-	s.r = bufio.NewReaderSize(conn, 1024*512)
-}
-
 // WritingLoop consumes backQ and send response to client
 // It close the connection to notify reader on error
 // and continue loop until the reader has exited
 func (s *Session) WritingLoop() {
 	for rsp := range s.backQ {
-		if rsp == nil {
-			break
-		}
 		if err := s.handleRespPipeline(rsp); err != nil {
 			s.Close()
 			continue
@@ -97,7 +88,7 @@ func (s *Session) ReadingLoop() {
 	// wait for all request done
 	s.reqWg.Wait()
 	// notify writer
-	s.backQ <- nil
+	close(s.backQ)
 	s.closeSignal.Wait()
 }
 

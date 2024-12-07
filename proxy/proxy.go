@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"net"
 	"sync"
 
@@ -9,7 +10,6 @@ import (
 
 type Proxy struct {
 	addr       string
-	pool       *sync.Pool
 	dispatcher *Dispatcher
 	valkeyConn *ValkeyConn
 	exitChan   chan struct{}
@@ -17,20 +17,7 @@ type Proxy struct {
 
 func NewProxy(addr string, dispatcher *Dispatcher, valkeyConn *ValkeyConn) *Proxy {
 	p := &Proxy{
-		addr: addr,
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return &Session{
-					cached:      make(map[string]map[string]string),
-					backQ:       make(chan *PipelineResponse, 1000),
-					closeSignal: &sync.WaitGroup{},
-					reqWg:       &sync.WaitGroup{},
-					valkeyConn:  valkeyConn,
-					dispatcher:  dispatcher,
-					rspHeap:     &PipelineResponseHeap{},
-				}
-			},
-		},
+		addr:       addr,
 		dispatcher: dispatcher,
 		valkeyConn: valkeyConn,
 		exitChan:   make(chan struct{}),
@@ -43,10 +30,18 @@ func (p *Proxy) Exit() {
 }
 
 func (p *Proxy) handleConnection(cc net.Conn) {
-	session := p.pool.Get().(*Session)
+	session := &Session{
+		Conn:        cc,
+		r:           bufio.NewReaderSize(cc, 1024*512),
+		cached:      make(map[string]map[string]string),
+		backQ:       make(chan *PipelineResponse, 1000),
+		closeSignal: &sync.WaitGroup{},
+		reqWg:       &sync.WaitGroup{},
+		valkeyConn:  p.valkeyConn,
+		dispatcher:  p.dispatcher,
+		rspHeap:     &PipelineResponseHeap{},
+	}
 	defer session.Close()
-	defer p.pool.Put(session)
-	session.Reset(cc)
 	session.Run()
 }
 
