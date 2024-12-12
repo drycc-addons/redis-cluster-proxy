@@ -3,3 +3,6 @@
 github.com/golang/glog
 github.com/golang/glog/internal/logsink
 github.com/golang/glog/internal/stackdump
+# github.com/maurice2k/ultrapool v1.2.0
+## explicit; go 1.18
+github.com/maurice2k/ultrapool

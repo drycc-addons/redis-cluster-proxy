@@ -2,22 +2,35 @@ package proxy
 
 import (
 	"bufio"
-	"net"
+	"runtime"
 	"sync"
+	"time"
 
+	"github.com/drycc-addons/valkey-cluster-proxy/fnet"
 	"github.com/golang/glog"
+	"github.com/maurice2k/ultrapool"
 )
 
 type Proxy struct {
 	addr       string
+	workers    *ultrapool.WorkerPool
 	dispatcher *Dispatcher
 	valkeyConn *ValkeyConn
 	exitChan   chan struct{}
 }
 
 func NewProxy(addr string, dispatcher *Dispatcher, valkeyConn *ValkeyConn) *Proxy {
+	workers := ultrapool.NewWorkerPool(func(task ultrapool.Task) {
+		task.(*Session).WritingLoop()
+	})
+	maxProcs := runtime.GOMAXPROCS(0)
+	workers.SetNumShards(maxProcs * 2)
+	workers.SetIdleWorkerLifetime(5 * time.Second)
+	workers.Start()
+
 	p := &Proxy{
 		addr:       addr,
+		workers:    workers,
 		dispatcher: dispatcher,
 		valkeyConn: valkeyConn,
 		exitChan:   make(chan struct{}),
@@ -26,10 +39,11 @@ func NewProxy(addr string, dispatcher *Dispatcher, valkeyConn *ValkeyConn) *Prox
 }
 
 func (p *Proxy) Exit() {
+	defer p.workers.Stop()
 	close(p.exitChan)
 }
 
-func (p *Proxy) handleConnection(cc net.Conn) {
+func (p *Proxy) handleConnection(cc fnet.Connection) {
 	session := &Session{
 		Conn:        cc,
 		r:           bufio.NewReaderSize(cc, 1024*512),
@@ -41,31 +55,23 @@ func (p *Proxy) handleConnection(cc net.Conn) {
 		dispatcher:  p.dispatcher,
 		rspHeap:     &PipelineResponseHeap{},
 	}
+	session.Prepare()
+	p.workers.AddTask(session)
+	session.ReadingLoop()
 	defer session.Close()
-	session.Run()
 }
 
 func (p *Proxy) Run() {
-	tcpAddr, err := net.ResolveTCPAddr("tcp", p.addr)
+	server, err := fnet.NewServer(p.addr)
 	if err != nil {
 		glog.Fatal(err)
 	}
+	config := server.GetListenConfig()
+	config.SocketDeferAccept = true
+	config.SocketFastOpen = true
+	config.SocketReusePort = true
 
-	listener, err := net.ListenTCP("tcp", tcpAddr)
-	if err != nil {
-		glog.Fatal(err)
-	} else {
-		glog.Infof("proxy listens on %s", p.addr)
-	}
-	defer listener.Close()
-
-	for {
-		conn, err := listener.AcceptTCP()
-		if err != nil {
-			glog.Error(err)
-			continue
-		}
-		glog.Infof("accept client: %s", conn.RemoteAddr())
-		go p.handleConnection(conn)
-	}
+	server.SetRequestHandler(p.handleConnection)
+	server.Listen()
+	server.Serve()
 }

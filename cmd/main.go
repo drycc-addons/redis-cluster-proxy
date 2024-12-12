@@ -31,7 +31,7 @@ func init() {
 	flag.StringVar(&config.Password, "password", "", "password for backend server, it will send this password to backend server")
 	flag.StringVar(&config.StartupNodes, "startup-nodes", "127.0.0.1:7001", "startup nodes used to query cluster topology")
 	flag.DurationVar(&config.ConnectTimeout, "connect-timeout", 10*time.Second, "connect to backend timeout")
-	flag.DurationVar(&config.SlotsReloadInterval, "slots-reload-interval", 3*time.Second, "slots reload interval")
+	flag.DurationVar(&config.SlotsReloadInterval, "slots-reload-interval", 30*time.Second, "slots reload interval")
 	flag.IntVar(&config.MaxProcs, "max-procs", 1, "sets the maximum number of CPUs that can be executing")
 	flag.IntVar(&config.BackendInitConnections, "backend-init-connections", 5, "max number of init connections for each backend server")
 	flag.IntVar(&config.BackendIdleConnections, "backend-idle-connections", 5, "max number of idle connections for each backend server")

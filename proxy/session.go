@@ -44,10 +44,8 @@ type Session struct {
 	multiCmdErr bool
 }
 
-func (s *Session) Run() {
+func (s *Session) Prepare() {
 	s.closeSignal.Add(1)
-	go s.WritingLoop()
-	s.ReadingLoop()
 }
 
 // WritingLoop consumes backQ and send response to client
